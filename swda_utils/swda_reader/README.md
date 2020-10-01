@@ -1,6 +1,10 @@
 Switchboard Dialog Act Corpus with Penn Treebank links
 =========================
 
+## Acknowledgements
+
+This is entirely stolen from https://github.com/cgpotts/swda
+
 ## Overview
 
 [The Switchboard Dialog Act Corpus](http://www.stanford.edu/~jurafsky/ws97/) (SwDA) extends
