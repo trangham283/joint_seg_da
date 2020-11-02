@@ -29,6 +29,37 @@ def init_word_embedding(load_pretrained_word_embedding=False,
                         pretrained_word_embedding_path=None,
                         id2word=None, word_embedding_dim=None,
                         vocab_size=None, pad_token_id=None):
+
+    if load_pretrained_word_embedding:
+        pretrained_embeddings = json.load(open(pretrained_word_embedding_path))
+            
+        embeddings = []
+        in_vocab_cnt = 0
+        for word_id in range(len(id2word)):
+            word = id2word[word_id]
+            if word in pretrained_embeddings:
+                embeddings.append(pretrained_embeddings[word])
+                in_vocab_cnt += 1
+            else:
+                embeddings.append([0.0]*word_embedding_dim)
+        weights = nn.Parameter(torch.FloatTensor(embeddings).to(DEVICE))
+        print("{}/{} pretrained word embedding in vocab".format(in_vocab_cnt, vocab_size))
+    else:
+        weights = nn.Parameter(
+            torch.FloatTensor(
+                vocab_size,
+                word_embedding_dim
+            ).to(DEVICE)
+        )
+        torch.nn.init.uniform_(weights, -1.0, 1.0)
+
+    weights[pad_token_id].data.fill_(0)
+    return weights
+
+def init_word_embedding_old(load_pretrained_word_embedding=False,
+                        pretrained_word_embedding_path=None,
+                        id2word=None, word_embedding_dim=None,
+                        vocab_size=None, pad_token_id=None):
     if load_pretrained_word_embedding:
         embeddings = []
         pretrained_embeddings = json.load(open(pretrained_word_embedding_path))

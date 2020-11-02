@@ -25,5 +25,5 @@ class Config(object):
         self.out_dir = self.task_data_dir
 
         # Pretrained embeddings (for initialization and evaluation)
-        #self.word_embedding_path = f"{self.task_data_dir}/glove_twitter_200.json"
-        #self.eval_word_embedding_path = f"{self.task_data_dir}/glove_twitter_200.json"
+        self.word_embedding_path = "/g/ssli/data/CTS-English/swbd_align/glove300.json"
+        self.eval_word_embedding_path = "/g/ssli/data/CTS-English/swbd_align/glove300.json"

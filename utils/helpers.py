@@ -3,13 +3,12 @@ import code
 import collections
 import re
 
-import gensim
-import ftfy
 import torch
 import numpy as np
 
-
+# NOTE (TT): not used
 def load_partial_pretrained_word_embedding_as_dict(vocab, embedding_path, embedding_type):
+    import gensim
     word_embedding = {}
     if embedding_type in ["glove"]:
         with open(embedding_path) as f:
@@ -31,8 +30,9 @@ def load_partial_pretrained_word_embedding_as_dict(vocab, embedding_path, embedd
         raise Exception(f"Unknown embedding type: {embedding_type}")
     return word_embedding
 
-
+# NOTE (TT): not used
 def standardize_english_text(string):
+    import ftfy
     """
     string cleaning for English
     """
