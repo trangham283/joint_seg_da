@@ -7,6 +7,7 @@ from nltk.translate.bleu_score import sentence_bleu
 from nltk.translate.bleu_score import SmoothingFunction
 from sklearn.metrics.pairwise import cosine_similarity as cosine
 import sklearn as sk
+import jiwer
 
 from .sif_embedding import SIF_embedding, compute_pc, get_weighted_average
 
@@ -111,6 +112,88 @@ class DAMetrics:
             "strict joint error": np.mean(score_lists["strict joint error"]),
             "Macro F1": macro_f1,
             "Micro F1": micro_f1,
+        }
+
+#TODO: add relaxed version of metric
+class JointDAMetrics:
+    def __init__(self):
+        pass
+
+    def instance_metrics(self, ref_labels, hyp_labels):
+        segment_records = []
+        n_segment_tokens, n_segment_seg_errors, n_segment_joint_errors = 0, 0, 0
+        for ref, hyp in zip(ref_labels, hyp_labels):
+            n_segment_tokens += 1
+            if hyp[0] != ref[0]:
+                n_segment_seg_errors += 1
+            if hyp != ref:
+                n_segment_joint_errors += 1
+            if ref.startswith("E"):
+                segment_records.append((n_segment_tokens, n_segment_seg_errors, n_segment_joint_errors))
+                n_segment_tokens, n_segment_seg_errors, n_segment_joint_errors = 0, 0, 0
+        
+        n_segments = len(segment_records)
+        n_tokens = 0
+        n_wrong_seg_segments = 0
+        n_wrong_seg_tokens = 0
+        n_wrong_joint_segments = 0
+        n_wrong_joint_tokens = 0
+        for (n_segment_tokens, n_segment_seg_errors, n_segment_joint_errors) in segment_records:
+            n_tokens += n_segment_tokens
+            if n_segment_seg_errors > 0:
+                n_wrong_seg_segments += 1
+                n_wrong_seg_tokens += n_segment_tokens
+            if n_segment_joint_errors > 0:
+                n_wrong_joint_segments += 1
+                n_wrong_joint_tokens += n_segment_tokens
+
+        DSER = n_wrong_seg_segments / n_segments
+        strict_seg_err = n_wrong_seg_tokens / n_tokens
+        DER = n_wrong_joint_segments / n_segments
+        strict_joint_err = n_wrong_joint_tokens / n_tokens
+
+        ref_short = [x for x in ref_labels if x != "I"]
+        hyp_short = [x for x in hyp_labels if x != "I"]
+        lwer = jiwer.wer(ref_short, hyp_short)
+        return {
+            "DSER": DSER,
+            "strict segmentation error": strict_seg_err,
+            "DER": DER,
+            "strict joint error": strict_joint_err,
+            "LWER": lwer
+        }
+
+    def batch_metrics(self, refs, hyps):
+        score_lists = {
+            "DSER": [],
+            "strict segmentation error": [],
+            "DER": [],
+            "strict joint error": [],
+            "LWER": []
+
+        }
+        for ref_labels, hyp_labels in zip(refs, hyps):
+            instance_metrics = self.instance_metrics(ref_labels, hyp_labels)
+            for k, v in instance_metrics.items():
+                score_lists[k].append(v)
+
+        flattened_refs = [label for ref in refs for label in ref]
+        flattened_hyps = [label for hyp in hyps for label in hyp]
+        macro_f1 = sk.metrics.f1_score(flattened_refs, flattened_hyps, average="macro")
+        micro_f1 = sk.metrics.f1_score(flattened_refs, flattened_hyps, average="micro")
+        flat_ref_short = [x for x in flattened_refs if x != "I"]
+        flat_hyp_short = [x for x in flattened_hyps if x != "I"]
+        lwer = jiwer.wer(flat_ref_short, flat_hyp_short)
+
+        return {
+            "DSER": np.mean(score_lists["DSER"]),
+            "strict segmentation error": np.mean(score_lists["strict segmentation error"]),
+            "DER": np.mean(score_lists["DER"]),
+            "strict joint error": np.mean(score_lists["strict joint error"]),
+            "Macro F1": macro_f1,
+            "Micro F1": micro_f1,
+            "Macro LWER": np.mean(score_lists["LWER"]),
+            "Micro LWER": lwer,
         }
 
 

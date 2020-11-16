@@ -15,12 +15,13 @@ import numpy as np
 import torch
 import torch.optim as optim
 
+from model.joint_da_seg_recog.ed import EDSeqLabeler
+from model.joint_da_seg_recog.attn_ed import AttnEDSeqLabeler
 from utils.helpers import StatisticsReporter
 from utils.metrics import JointDAMetrics as DAMetrics
+from tokenization.whitespace_tokenizer import WhiteSpaceTokenizer
 from tokenization.customized_tokenizer import CustomizedTokenizer
-from tokenization.bert_tokenizer import ModBertTokenizer
-from model.joint_da_seg_recog.ctx_attn_ed import BertAttnEDSeqLabeler
-from data_source import TextDataSource
+from data_source import DataSource
 
 # Create an experiment with your api key:
 experiment = Experiment(
@@ -51,7 +52,15 @@ def reslog(s, RES_FILE_NAME):
 
 def run_train(config):
     # tokenizers
-    tokenizer = ModBertTokenizer('base', cache_dir=config.cache_dir)
+    special_token_dict = {
+        "speaker1_token": "<speaker1>",
+        "speaker2_token": "<speaker2>"
+    }
+    tokenizer = WhiteSpaceTokenizer(
+        word_count_path=config.word_count_path,
+        vocab_size=config.vocab_size,
+        special_token_dict=special_token_dict
+    )
     label_token_dict = {
         f"label_{label_idx}_token": label 
         for label_idx, label in enumerate(config.joint_da_seg_recog_labels)
@@ -84,7 +93,7 @@ def run_train(config):
     with open(config.dataset_path, encoding="utf-8") as f:
         dataset = json.load(f)
     mlog("----- Loading training data -----", config, LOG_FILE_NAME)
-    train_data_source = TextDataSource(
+    train_data_source = DataSource(
         data=dataset["train"],
         config=config,
         tokenizer=tokenizer,
@@ -93,7 +102,7 @@ def run_train(config):
     mlog(str(train_data_source.statistics), config, LOG_FILE_NAME)
     
     mlog("----- Loading dev data -----", config, LOG_FILE_NAME)
-    dev_data_source = TextDataSource(
+    dev_data_source = DataSource(
         data=dataset["dev"],
         config=config,
         tokenizer=tokenizer,
@@ -102,12 +111,11 @@ def run_train(config):
     mlog(str(dev_data_source.statistics), config, LOG_FILE_NAME)
 
     # build model
-    if config.model == "bert_attn_ed":
-        Model = BertAttnEDSeqLabeler
-    else:
-        # FIXME: add other models
-        exit(1)
-    model = Model(config, tokenizer, label_tokenizer, freeze=config.freeze)
+    if config.model == "ed":
+        Model = EDSeqLabeler
+    elif config.model == "attn_ed":
+        Model = AttnEDSeqLabeler
+    model = Model(config, tokenizer, label_tokenizer)
 
     # model adaption
     if torch.cuda.is_available():
@@ -138,8 +146,6 @@ def run_train(config):
     mlog("----- Hyper-parameters -----", config, LOG_FILE_NAME)
     for k, v in sorted(dict(config.__dict__).items()):
         mlog("{}: {}".format(k, v), config, LOG_FILE_NAME)
-    for name, param in model.named_parameters():
-        mlog("{}: {}; Grad: {}".format(name, param.size(), param.requires_grad), config, LOG_FILE_NAME)
 
     # here we go
     n_step = 0
@@ -225,11 +231,11 @@ def run_train(config):
 
                 # Save model if it has better monitor measurement
                 if config.save_model:
-                    if not os.path.exists(f"{config.model_save_path}/model/"):
-                        os.makedirs(f"{config.model_save_path}/model/")
+                    if not os.path.exists(f"{config.task_data_dir}/model/"):
+                        os.makedirs(f"{config.task_data_dir}/model/")
 
-                    torch.save(model.state_dict(), f"{config.model_save_path}/model/{LOG_FILE_NAME}.model.pt")
-                    mlog(f"model saved to {config.model_save_path}/model/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
+                    torch.save(model.state_dict(), f"{config.task_data_dir}/model/{LOG_FILE_NAME}.model.pt")
+                    mlog(f"model saved to {config.task_data_dir}/model/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
 
                     if torch.cuda.is_available():
                         model = model.cuda()
@@ -245,7 +251,7 @@ def run_train(config):
     # Evaluate on test dataset at the end of training
     mlog("----- EVALUATING at end of training -----", config, LOG_FILE_NAME)
     mlog("----- Loading test data -----", config, LOG_FILE_NAME)
-    test_data_source = TextDataSource(
+    test_data_source = DataSource(
         data=dataset["test"],
         config=config,
         tokenizer=tokenizer,
@@ -295,7 +301,15 @@ def run_train(config):
 
 def run_test(config):
     # tokenizers
-    tokenizer = ModBertTokenizer('base', cache_dir=config.cache_dir)
+    special_token_dict = {
+        "speaker1_token": "<speaker1>",
+        "speaker2_token": "<speaker2>"
+    }
+    tokenizer = WhiteSpaceTokenizer(
+        word_count_path=config.word_count_path,
+        vocab_size=config.vocab_size,
+        special_token_dict=special_token_dict
+    )
     label_token_dict = {
         f"label_{label_idx}_token": label 
         for label_idx, label in enumerate(config.joint_da_seg_recog_labels)
@@ -313,7 +327,7 @@ def run_test(config):
     metrics = DAMetrics()
 
     mlog("----- Loading dev data -----", config, config.LOG_FILE_NAME)
-    dev_data_source = TextDataSource(
+    dev_data_source = DataSource(
         data=dataset["dev"],
         config=config,
         tokenizer=tokenizer,
@@ -326,7 +340,7 @@ def run_test(config):
         Model = EDSeqLabeler
     elif config.model == "attn_ed":
         Model = AttnEDSeqLabeler
-    model = Model(config, tokenizer, label_tokenizer, freeze=config.freeze)
+    model = Model(config, tokenizer, label_tokenizer)
 
     # model adaption
     if torch.cuda.is_available():
@@ -341,7 +355,7 @@ def run_test(config):
     mlog(f"model path: {config.model_path}", config, config.LOG_FILE_NAME)
 
     mlog("----- Loading test data -----", config, config.LOG_FILE_NAME)
-    test_data_source = TextDataSource(
+    test_data_source = DataSource(
         data=dataset["test"],
         config=config,
         tokenizer=tokenizer,
@@ -394,20 +408,19 @@ if __name__ == "__main__":
     parser.add_argument("--run_test", type=str2bool, default=False)
 
     # model - architecture
-    parser.add_argument("--model", type=str, default="bert_attn_ed")
+    parser.add_argument("--model", type=str, default="attn_ed", 
+            help="[ed, attn_ed]")
     parser.add_argument("--rnn_type", type=str, default="gru", 
             help="[gru, lstm]")
-    parser.add_argument("--freeze", type=str, default="all", 
-            help="[all, pooler_only, top_layer]")
+    parser.add_argument("--tokenizer", type=str, default="ws", help="[ws]")
     parser.add_argument("--tie_weights", type=str2bool, default=True, 
             help="tie weights for decoder")
     parser.add_argument("--attention_type", type=str, default="sent", help="[word, sent]")
 
     # model - numbers
-    parser.add_argument("--vocab_size", type=int, default=20000, 
-            help="keep top frequent words; relevant to GloVe-like emb only")
-    parser.add_argument("--history_len", type=int, default=3, 
-            help="number of history sentences")
+    parser.add_argument("--vocab_size", type=int, default=20000)
+    parser.add_argument("--history_len", type=int, default=3, help="number of history sentences")
+    parser.add_argument("--word_embedding_dim", type=int, default=300)
     parser.add_argument("--attr_embedding_dim", type=int, default=30)
     parser.add_argument("--sent_encoder_hidden_dim", type=int, default=100)
     parser.add_argument("--n_sent_encoder_layers", type=int, default=1)
@@ -417,39 +430,24 @@ if __name__ == "__main__":
     parser.add_argument("--n_decoder_layers", type=int, default=1)
 
     # training
-    parser.add_argument("--seed", type=int, default=42, 
-            help="random initialization seed")
-    parser.add_argument("--max_uttr_len", type=int, default=45, 
-            help="max utterance length for truncation")
-    parser.add_argument("--dropout", type=float, default=0.2, 
-            help="dropout probability")
-    parser.add_argument("--l2_penalty", type=float, default=0.0001, 
-            help="l2 penalty")
-    parser.add_argument("--optimizer", type=str, default="adam", 
-            help="optimizer")
-    parser.add_argument("--init_lr", type=float, default=0.001, 
-            help="init learning rate")
-    parser.add_argument("--min_lr", type=float, default=1e-7, 
-            help="minimum learning rate for early stopping")
+    parser.add_argument("--seed", type=int, default=42, help="random initialization seed")
+    parser.add_argument("--max_uttr_len", type=int, default=45, help="max utterance length for trauncation")
+    parser.add_argument("--dropout", type=float, default=0.2, help="dropout probability")
+    parser.add_argument("--l2_penalty", type=float, default=0.0001, help="l2 penalty")
+    parser.add_argument("--optimizer", type=str, default="adam", help="optimizer")
+    parser.add_argument("--init_lr", type=float, default=0.001, help="init learning rate")
+    parser.add_argument("--min_lr", type=float, default=1e-7, help="minimum learning rate for early stopping")
     parser.add_argument("--lr_decay_rate", type=float, default=0.5)
-    parser.add_argument("--gradient_clip", type=float, default=5.0, 
-            help="gradient clipping")
-    parser.add_argument("--n_epochs", type=int, default=20, 
-            help="number of epochs for training")
-    parser.add_argument("--use_pretrained_word_embedding", type=str2bool, 
-            default=True)
-    parser.add_argument("--batch_size", type=int, default=64, 
-            help="batch size for training")
-    parser.add_argument("--eval_batch_size", type=int, default=64,
-            help="batch size for evaluation")
+    parser.add_argument("--gradient_clip", type=float, default=5.0, help="gradient clipping")
+    parser.add_argument("--n_epochs", type=int, default=20, help="number of epochs for training")
+    parser.add_argument("--use_pretrained_word_embedding", type=str2bool, default=True)
+    parser.add_argument("--batch_size", type=int, default=64, help="batch size for training")
+    parser.add_argument("--eval_batch_size", type=int, default=64, help="batch size for evaluation")
 
     # inference
-    parser.add_argument("--decode_max_len", type=int, default=45, 
-            help="max utterance length for decoding")
-    parser.add_argument("--gen_type", type=str, default="greedy", 
-            help="[greedy, sample, top]")
-    parser.add_argument("--temp", type=float, default=1.0, 
-            help="temperature for decoding")
+    parser.add_argument("--decode_max_len", type=int, default=40, help="max utterance length for decoding")
+    parser.add_argument("--gen_type", type=str, default="greedy", help="[greedy, sample, top]")
+    parser.add_argument("--temp", type=float, default=1.0, help="temperature for decoding")
     parser.add_argument("--top_k", type=int, default=0)
     parser.add_argument("--top_p", type=float, default=0.0)
 
@@ -460,15 +458,14 @@ if __name__ == "__main__":
     parser.add_argument("--save_model", type=str2bool, default=True)
     parser.add_argument("--check_loss_after_n_step", type=int, default=100)
     parser.add_argument("--validate_after_n_step", type=int, default=1000)
-    parser.add_argument("--filename_note", type=str, 
-            help="take a note in saved files' names")
+    parser.add_argument("--filename_note", type=str, help="take a note in saved files' names")
     config = parser.parse_args()
 
     # load corpus config
     if config.run_train:
-        from swda_utils.config import BertTrainConfig as Config
+        from swda_utils.config import TrainConfig as Config
     elif config.run_test:
-        from test_configs.config import BertTestConfig as Config
+        from test_configs.config import TestConfig as Config
     else:
         print("Need to choose run train or run test; Exiting")
         exit(0)

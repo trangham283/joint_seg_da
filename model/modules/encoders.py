@@ -14,7 +14,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class EncoderRNN(nn.Module):
     def __init__(self, input_dim, hidden_dim, n_layers,
                  embedding=None, bidirectional=True,
-                 dropout_emb=0.0, dropout_input=0.0, dropout_hidden=0.0, dropout_output=0.0,
+                 dropout_emb=0.0, dropout_input=0.0, 
+                 dropout_hidden=0.0, dropout_output=0.0,
                  rnn_type="gru"):
         super(EncoderRNN, self).__init__()
 

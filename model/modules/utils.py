@@ -42,14 +42,15 @@ def init_word_embedding(load_pretrained_word_embedding=False,
                 in_vocab_cnt += 1
             else:
                 embeddings.append([0.0]*word_embedding_dim)
-        weights = nn.Parameter(torch.FloatTensor(embeddings).to(DEVICE))
+        #weights = nn.Parameter(torch.FloatTensor(embeddings).to(DEVICE))
+        weights = nn.Parameter(torch.FloatTensor(embeddings))
         print("{}/{} pretrained word embedding in vocab".format(in_vocab_cnt, vocab_size))
     else:
         weights = nn.Parameter(
             torch.FloatTensor(
                 vocab_size,
                 word_embedding_dim
-            ).to(DEVICE)
+            )
         )
         torch.nn.init.uniform_(weights, -1.0, 1.0)
 

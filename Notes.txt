@@ -1,0 +1,18 @@
+Difference in tokenization count because of BERT:
+thres = 45
+print("stats: ", len(lens_bert), max(lens_bert), min(lens_bert), np.mean(lens_bert), np.median(lens_bert), len([x for x in lens_bert if x > thres]))
+print("stats: ", len(lens_ws), max(lens_ws), min(lens_ws), np.mean(lens_ws), np.median(lens_ws), len([x for x in lens_ws if x > thres]))
+print("stats: ", len(diffs), max(diffs), min(diffs), np.mean(diffs), np.median(diffs))
+- train set: 
+  193805 130 1 8.589293361884367 6.0 1084
+  193805 119 1 7.869311937256521 5.0 743
+  193805 14 0 0.7199814246278475 0.0
+- dev set: 
+  3290 64 1 8.916413373860182 7.0 7
+  3290 58 1 8.151671732522797 6.0 4
+  3290 8 0 0.764741641337386 0.0
+- test set: stats: 
+  4096 89 1 8.299560546875 6.0 18
+  4096 79 1 7.58349609375 5.0 12
+  4096 10 0 0.716064453125 0.0
+

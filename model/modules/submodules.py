@@ -66,10 +66,12 @@ class DynamicRNN(nn.Module):
         # for full length batch data
         if input_lens is None:
             L = inputs.size(1)
-            input_lens = torch.LongTensor([L]*B).to(DEVICE)
+            #input_lens = torch.LongTensor([L]*B).to(DEVICE)
+            # NOTE: torch 1.7 requires lens on cpu
+            input_lens = torch.LongTensor([L]*B, device='cpu')
         else:
             # avoid zero-length sequence
-            input_lens = input_lens.clone()
+            input_lens = input_lens.clone().to("cpu")
             input_lens.data[input_lens == 0] = 1
 
         # pack

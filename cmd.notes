@@ -1,0 +1,1 @@
+gpu-migrate --max-cpu=1 --max-mem=12000 --require TARGET.NikolaHost=="\"james\""  "./train_gen.sh"
