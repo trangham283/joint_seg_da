@@ -1,0 +1,32 @@
+15041.55s Epoch 7 batch 742 - loss: 2.3671
+<Dev> learning rate: 0.0005
+
+
+<Dev> - 15106.582s - loss: 2.9152, monitor: 2.9152
+Traceback (most recent call last):
+File "train.py", line 470, in <module>
+  
+File "train.py", line 211, in run_train
+    metrics_results = metrics.batch_metrics(true_labels, pred_labels)
+File "/atm/goose/turkey/transitory/ttmt001/dialog-act-prediction/joint_seg_da/utils/metrics.py", line 182, in batch_metrics
+  macro_f1 = sk.metrics.f1_score(flattened_refs, flattened_hyps, average="macro")
+    File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/utils/validation.py", line 72, in inner_f
+        return f(**kwargs)
+File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/metrics/_classification.py", line 1047, in f1_score
+  zero_division=zero_division)
+    File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/utils/validation.py", line 72, in inner_f
+        return f(**kwargs)
+File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/metrics/_classification.py", line 1175, in fbeta_score
+  zero_division=zero_division)
+    File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/utils/validation.py", line 72, in inner_f
+        return f(**kwargs)
+File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/metrics/_classification.py", line 1434, in precision_recall_fscore_support
+  pos_label)
+    File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/metrics/_classification.py", line 1250, in _check_set_wise_labels
+        y_type, y_true, y_pred = _check_targets(y_true, y_pred)
+File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/metrics/_classification.py", line 81, in _check_targets
+  check_consistent_length(y_true, y_pred)
+File "/atm/goose/turkey/transitory/ttmt001/envs/py3.6-torch1.7-gpu/lib/python3.6/site-packages/sklearn/utils/validation.py", line 256, in check_consistent_length
+  " samples: %r" % [int(l) for l in lengths])
+  ValueError: Found input variables with inconsistent numbers of samples: [29232, 29223]
+

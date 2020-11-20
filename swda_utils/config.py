@@ -1,4 +1,4 @@
-class BertTrainConfig(object):
+class SpeechConfig(object):
     def __init__(self):
         self.dialog_acts = ['sd', 'b', 'sv', '%', 'aa', 'ba', 'qy', 'ny', 'fc',
                 'qw', 'nn', 'bk', 'fo_o_fw_"_by_bc', 'h', 'qy^d', 'bh', '^q', 
@@ -13,6 +13,7 @@ class BertTrainConfig(object):
         self.task_data_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/joint"
         self.dataset_path = f"{self.task_data_dir}/dataset.txt"
         self.word_count_path = f"{self.task_data_dir}/word_count.txt"
+        self.feature_dir = "/s0/ttmt001/acoustic_features_json"
         self.cache_dir = "/s0/ttmt001"
         self.model_save_path = "/s0/ttmt001/joint_da"
 

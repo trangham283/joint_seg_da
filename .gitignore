@@ -1,3 +1,7 @@
 __pycache__*
 *.pyc
 .DS_Store
+condor_logs
+condor_reference.txt
+debug*
+*_bak.py

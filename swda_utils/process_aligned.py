@@ -12,6 +12,9 @@ import pandas as pd
 import glob
 import numpy as np
 
+from transformers import BertTokenizer
+
+bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', cache_dir="/s0/ttmt001")
 
 def postprocess(data_dir, split):
     filename = os.path.join(data_dir, split + "_aligned.tsv")
@@ -44,6 +47,100 @@ def postprocess(data_dir, split):
     # train: 81; dev: 49; test: 60
     return pd.DataFrame(list_row), da_lengths
 
+def postprocess_wordlevel(data_dir, split):
+    filename = os.path.join(data_dir, split + "_aligned.tsv")
+    df = pd.read_csv(filename, sep="\t")
+    list_row = []
+    da_lengths = []
+    # order by dialog
+    for filenum, df_file in df.groupby('filenum'):
+        df_sorted_sents = df_file.sort_values('turn_id', kind='mergesort')
+        # setting sort=False preserves turn orders
+        for sent_id,df_sorted in df_sorted_sents.groupby('sent_id', sort=False):
+            ms_tokens = df_sorted.ms_token.tolist()
+            da_tokens = df_sorted.da_token.tolist()
+            da_len = len(da_tokens)
+            da_lengths.append(da_len)
+            list_row.append({
+                'filenum': filenum,
+                'da_speaker': df_sorted.da_speaker.values[0],
+                'true_speaker': df_sorted.true_speaker.values[0],
+                'turn_id': df_sorted.turn_id.values[0],
+                'sent_id': sent_id,
+                'da_label': df_sorted.da_label.values[0],
+                'da_sent': ' '.join(da_tokens),
+                'ms_sent': ' '.join(ms_tokens),
+                'start_times': df_sorted.start_time.tolist(),
+                'end_times': df_sorted.end_time.tolist()
+                })
+    print("Max len in split: ", max(da_lengths))
+    # train: 81; dev: 49; test: 60
+    return pd.DataFrame(list_row), da_lengths
+
+def get_bert_times(row):
+    copy_num = len(row.bert_toks)
+    start = [row.start_time]*copy_num
+    end = [row.end_time]*copy_num
+    return start, end
+
+def get_bert_da_labels(row):
+    copy_num = len(row.bert_toks)
+    labels = [row.da_label]*copy_num
+    sent_ids = [row.sent_id]*copy_num
+    return labels, sent_ids
+
+def postprocess_turnlevel(data_dir, split):
+    filename = os.path.join(data_dir, split + "_aligned.tsv")
+    df = pd.read_csv(filename, sep="\t")
+    da_lengths = []
+    sessions = {}
+    # order by dialog
+    for filenum, df_file in df.groupby('filenum'):
+        list_row = []
+        df_sorted_sents = df_file.sort_values('turn_id', kind='mergesort')
+        for turn_id, df_turn in df_sorted_sents.groupby('turn_id'):
+            df_sorted = df_turn[df_turn.da_token != "<MISSED>"]
+            if len(df_sorted) < 1:
+                print("empty turn:", filenum, turn_id)
+                continue
+            df_sorted['bert_toks'] = df_sorted.da_token.apply(
+                    bert_tokenizer.tokenize)
+            df_sorted['bert_start'] = df_sorted.apply(lambda x: 
+                    get_bert_times(x)[0], axis=1)
+            df_sorted['bert_end'] = df_sorted.apply(lambda x: 
+                    get_bert_times(x)[1], axis=1)
+            bert_starts = df_sorted.bert_start.tolist()
+            bert_starts = [item for x in bert_starts for item in x]
+            bert_ends = df_sorted.bert_end.tolist()
+            bert_ends = [item for x in bert_ends for item in x]
+            joint_labels = []
+            turn_tokens = []
+            sent_ids = []
+            for sent_id, sent_df in df_sorted.groupby('sent_id'):
+                bert_tokens = sent_df.bert_toks.tolist()
+                bert_tokens = [item for x in bert_tokens for item in x]
+                turn_tokens += bert_tokens
+                dialog_act = sent_df.da_label.values[0]
+                joint_labels += ["I"]*(len(bert_tokens) - 1) + ["E_"+dialog_act]
+                sent_ids += [sent_id]*len(bert_tokens)
+            # NOTE: needed to convert to int() here bc of JSON
+            list_row.append({
+                'filenum': int(filenum),
+                'speaker': df_sorted.true_speaker.values[0],
+                'turn_id': int(df_sorted.turn_id.values[0]),
+                'sent_ids': sent_ids,
+                'joint_labels': joint_labels,
+                'da_turn': turn_tokens,
+                'start_times': bert_starts,
+                'end_times': bert_ends
+                })
+            sessions[filenum] = list_row
+            da_len = len(turn_tokens)
+            da_lengths.append(da_len)
+    print("Max turn len in split: ", max(da_lengths))
+    # train: 81; dev: 49; test: 60
+    return sessions
+
 def main():
     """main function"""
     pa = argparse.ArgumentParser(description='combine tokens into turns')
@@ -54,13 +151,21 @@ def main():
     data_dir = args.data_dir
     split = args.split
 
-    split_df, lengths = postprocess(data_dir, split)
-    outname = os.path.join(data_dir, split + '_aligned_dialogs.tsv')
-    split_df.to_csv(outname, sep="\t", index=False)
-    lenlog = os.path.join(data_dir, split + '_lengths.json')
-    with open(lenlog, 'w') as fout:
-        json.dump(lengths, fout, indent=2)
+    #split_df, lengths = postprocess(data_dir, split)
+    #outname = os.path.join(data_dir, split + '_aligned_dialogs.tsv')
+    #lenlog = os.path.join(data_dir, split + '_lengths.json')
+    #with open(lenlog, 'w') as fout:
+    #    json.dump(lengths, fout, indent=2)
 
+    #split_df, lengths = postprocess_wordlevel(data_dir, split)
+    #outname = os.path.join(data_dir, split + '_aligned_dialogs_wordlevel.tsv')
+    #split_df.to_csv(outname, sep="\t", index=False)
+    
+    outname = os.path.join(data_dir, split + '_bert_turns.json')
+    sessions = postprocess_turnlevel(data_dir, split)
+    with open(outname, "w") as f:
+        json.dump(sessions, f)
+    
     exit(0)
 
 if __name__ == '__main__':

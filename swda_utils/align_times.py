@@ -62,15 +62,24 @@ def unroll_toks(df_in):
     return df
 
 def norm_ms(tok):
+    orig = tok[:]
     if tok in MAP_MS: 
         tok = MAP_MS[tok]
+    if "/" in tok:
+        idx = tok.index("/")
+        tok = tok[1:idx]
     if '[laughter-' in tok:
         tok = tok.replace('[laughter-', '').replace(']', '')
     if tok.endswith('_1'):
         tok = tok.replace('_1', '')
+    if tok.count('[') > 1:
+        tok = tok[tok.index(']')+1:]
     if tok.endswith(']-'):
         idx = tok.index('[')
         tok = tok[:idx]
+    if tok.startswith('-['):
+        idx = tok.index(']')
+        tok = tok[idx+1:]
     if tok.endswith('-'):
         tok = tok[:-1]
     if "{" in tok:
@@ -79,6 +88,8 @@ def norm_ms(tok):
         idx1 = tok.index('[')
         idx2 = tok.index(']')
         tok = tok[:idx1]+tok[idx2+1:]
+    if not tok: 
+        print("Original", orig)
     return tok
 
 # modify ms_toks_df to split by "-" and "'" but copy start and end times
@@ -101,7 +112,7 @@ def split_ms_toks(ms_toks_df):
         word_norm = row.word_norm
         if word_norm in ['<b_aside>', '<e_aside>']:
             continue
-        if word_norm in SPLIT3 or ("'" in word_norm and word_norm != "o'clock"):
+        if word_norm in SPLIT3 or ("'" in word_norm and word_norm not in ["o'clock", "n't"] and word_norm[0] != "'"):
             if "n't" in word_norm:
                 idx = word_norm.index("n't")
                 tok1 = word_norm[:idx]
@@ -264,7 +275,7 @@ let
 Cases to consider:
     1. Same tokens: transfer the start and end times of MS-tokens to DA-tokens
     2. Deletion: set da_token = "<MISSED>" and copy all other information
-    3. Insertion: 
+    3. Insertion: set ms_token = "<INSERTED>"
        for all tokens in da_side: 
        if prev_ms_turn==ms_side[i1].su_id and prev_da_side==da_side[j1].su_id:  
             start/end times = ms_side[i1-1]'s times
@@ -338,6 +349,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                 start_time = ms_part.loc[ms_idx].start_time
                 end_time = ms_part.loc[ms_idx].end_time
                 ms_token = ms_part.loc[ms_idx].word_norm
+                if not ms_token:
+                    print(ms_part)
                 list_row.append({
                     'filenum': filenum,
                     'da_speaker': speaker,
@@ -362,6 +375,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                 start_time = ms_part.loc[ms_idx].start_time
                 end_time = ms_part.loc[ms_idx].end_time
                 ms_token = ms_part.loc[ms_idx].word_norm
+                if not ms_token:
+                    print(ms_part)
                 list_row.append({
                     'filenum': filenum,
                     'da_speaker': speaker,
@@ -382,7 +397,7 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                 ms_idx = end_i 
             else:
                 ms_idx = max(i1-1, 0) 
-            ms_token = ""
+            ms_token = "<INSERTED>"
             start_time = ms_toks_df.loc[ms_idx].start_time
             end_time = ms_toks_df.loc[ms_idx].end_time
             for da_idx in range(j1, j2):
@@ -390,6 +405,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                 sent_id = da_part.loc[da_idx].sent_id
                 turn_id = da_part.loc[da_idx].turn_id
                 da_label = da_part.loc[da_idx].da_label
+                if not ms_token:
+                    print(ms_part)
                 list_row.append({
                     'filenum': filenum,
                     'da_speaker': speaker,
@@ -419,6 +436,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                     start_time = ms_part.loc[ms_idx].start_time
                     end_time = ms_part.loc[ms_idx].end_time
                     ms_token = ms_part.loc[ms_idx].word_norm
+                    if not ms_token:
+                        print(ms_part)
                     list_row.append({
                         'filenum': filenum,
                         'da_speaker': speaker,
@@ -439,7 +458,10 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                         sent_id = da_part.loc[da_idx].sent_id
                         turn_id = da_part.loc[da_idx].turn_id
                         da_label = da_part.loc[da_idx].da_label
-                        ms_token = "" # start/end time of ms stays the same 
+                        ms_token = "<INSERTED>" 
+                        # start/end time of ms stays the same 
+                        if not ms_token:
+                            print(ms_part)
                         list_row.append({
                             'filenum': filenum,
                             'da_speaker': speaker,
@@ -460,6 +482,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                         start_time = ms_part.loc[ms_idx].start_time
                         end_time = ms_part.loc[ms_idx].end_time
                         ms_token = ms_part.loc[ms_idx].word_norm
+                        if not ms_token:
+                            print(ms_part)
                         list_row.append({
                             'filenum': filenum,
                             'da_speaker': speaker,
@@ -486,6 +510,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                     start_time = ms_part.loc[ms_idx].start_time
                     end_time = ms_part.loc[ms_idx].end_time
                     ms_token = ms_part.loc[ms_idx].word_norm
+                    if not ms_token:
+                        print(ms_part)
                     temp_list.append({
                         'filenum': filenum,
                         'da_speaker': speaker,
@@ -506,7 +532,10 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                         sent_id = da_part.loc[da_idx].sent_id
                         turn_id = da_part.loc[da_idx].turn_id
                         da_label = da_part.loc[da_idx].da_label
-                        ms_token = "" # start/end time of ms stays the same 
+                        ms_token = "<INSERTED>" 
+                        # start/end time of ms stays the same 
+                        if not ms_token:
+                            print(ms_part)
                         temp_list.append({
                             'filenum': filenum,
                             'da_speaker': speaker,
@@ -527,6 +556,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                         start_time = ms_part.loc[ms_idx].start_time
                         end_time = ms_part.loc[ms_idx].end_time
                         ms_token = ms_part.loc[ms_idx].word_norm
+                        if not ms_token:
+                            print(ms_part)
                         temp_list.append({
                             'filenum': filenum,
                             'da_speaker': speaker,
@@ -541,7 +572,8 @@ def align_dfs(da_unroll_df, ms_df, filenum, speaker, true_speaker,
                             })
                 list_row += temp_list[::-1]
 
-    return pd.DataFrame(list_row)
+    ret_df = pd.DataFrame(list_row)
+    return ret_df
                 
 
 def get_alignments(config, split):
@@ -586,8 +618,8 @@ def get_alignments(config, split):
     split_df.to_csv(outname, sep="\t", index=False)
 
 def main():
-    from config import Config
-    config = Config()
+    from config import SpeechConfig
+    config = SpeechConfig()
 
     #get_align_checks(config, 'test')
     get_alignments(config, 'train')

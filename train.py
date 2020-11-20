@@ -77,6 +77,7 @@ def run_train(config):
     )
     if config.filename_note:
         LOG_FILE_NAME += f".{config.filename_note}"
+        experiment.set_name(config.filename_note)
 
     # data loaders & number reporters
     trn_reporter = StatisticsReporter()

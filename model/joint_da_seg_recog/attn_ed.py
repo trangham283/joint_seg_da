@@ -70,6 +70,8 @@ class AttnEDSeqLabeler(EDSeqLabeler):
         batch_size, history_len, max_sent_len = inputs.size()
         
         input_lens = (inputs != self.pad_token_id).sum(-1)
+        # put on CPU, torch 1.7 compat
+        input_lens.to("cpu")
         dial_lens = (input_lens > 0).long().sum(1)  # equals number of non-padding sents
 
         flat_inputs = inputs.view(batch_size*history_len, max_sent_len)
