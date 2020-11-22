@@ -126,6 +126,7 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         self.conv_sizes = config.conv_sizes
         self.d_pause_embedding = config.d_pause_embedding
         seld.d_speech = config.d_speech
+        self.feature_types = config.feature_types
 
         self.dial_encoder_hidden_dim = config.dial_encoder_hidden_dim
         self.n_dial_encoder_layers = config.n_dial_encoder_layers
@@ -168,7 +169,8 @@ class SpeechAttnEDSeqLabeler(nn.Module):
 
 
         # Encoding components
-        self.speech_encoder = SpeechFeatureEncoder(self.feature_sizes,
+        self.speech_encoder = SpeechFeatureEncoder(
+                self.feature_sizes,
                 self.d_speech, 
                 conv_sizes = self.conv_sizes,
                 d_pause_embedding=self.d_pause_emb)
@@ -240,113 +242,6 @@ class SpeechAttnEDSeqLabeler(nn.Module):
             embedding_dim=self.attr_embedding_dim
         )
 
-    def process_sent_frames(self, sent_partition, sent_frames):
-        feat_dim = sent_frames.shape[0]
-        speech_frames = []
-        for frame_idx in sent_partition:
-            center_frame = int((frame_idx[0] + frame_idx[1])/2)
-            start_idx = center_frame - int(self.fixed_word_length/2)
-            end_idx = center_frame + int(self.fixed_word_length/2)
-            raw_word_frames = sent_frames[:, frame_idx[0]:frame_idx[1]]
-            # feat_dim * number of frames
-            raw_count = raw_word_frames.shape[1]
-            if raw_count > self.fixed_word_length:
-                # too many frames, choose wisely
-                this_word_frames = sent_frames[:, frame_idx[0]:frame_idx[1]]
-                extra_ratio = int(raw_count/self.fixed_word_length)
-                if extra_ratio < 2:  # delete things in the middle
-                    mask = np.ones(raw_count, dtype=bool)
-                    num_extra = raw_count - self.fixed_word_length
-                    not_include = range(center_frame-num_extra,
-                                        center_frame+num_extra)[::2]
-                    # need to offset by beginning frame
-                    not_include = [x-frame_idx[0] for x in not_include]
-                    mask[not_include] = False
-                else:  # too big, just sample
-                    mask = np.zeros(raw_count, dtype=bool)
-                    include = range(frame_idx[0], frame_idx[1])[::extra_ratio]
-                    include = [x-frame_idx[0] for x in include]
-                    if len(include) > self.fixed_word_length:
-                        # still too many frames
-                        num_current = len(include)
-                        sub_extra = num_current - self.fixed_word_length
-                        num_start = int((num_current - sub_extra)/2)
-                        not_include = include[num_start:num_start+sub_extra]
-                        for ni in not_include:
-                            include.remove(ni)
-                    mask[include] = True
-                this_word_frames = this_word_frames[:, mask]
-            else:  # not enough frames, choose frames extending from center
-                this_word_frames = sent_frames[:, max(0, start_idx):end_idx]
-                if this_word_frames.shape[1] == 0:
-                    # make 0 if no frame info
-                    this_word_frames = np.zeros((feat_dim,
-                                                 self.fixed_word_length))
-                if start_idx < 0 and \
-                        this_word_frames.shape[1] < self.fixed_word_length:
-                    this_word_frames = np.hstack(
-                        [np.zeros((feat_dim, -start_idx)), this_word_frames])
-
-                # still not enough frames
-                if this_word_frames.shape[1] < self.fixed_word_length:
-                    num_more = self.fixed_word_length-this_word_frames.shape[1]
-                    this_word_frames = np.hstack(
-                        [this_word_frames, np.zeros((feat_dim, num_more))])
-            # flip frames within word
-            speech_frames.append(this_word_frames)
-            #print(this_word_frames.shape)
-        
-        # Add dummy word features for START and STOP
-        sent_frame_features = [np.zeros((feat_dim, self.fixed_word_length))] \
-            + speech_frames + [np.zeros((feat_dim, self.fixed_word_length))] 
-        return sent_frame_features
-
-    def prep_features(self, sent_ids, sfeatures):
-        pause_features = []
-        frame_features = []
-        scalar_features = []
-        for sent in sent_ids:
-            sent_features = sfeatures[sent]
-            if 'pause' in sent_features.keys():
-                sent_pauses = [START] + [str(i) for i in \
-                        sent_features['pause']] + [STOP]
-                sent_pauses = [self.pause_vocab.index(x) for x in sent_pauses]
-                pause_features += sent_pauses
-            if 'scalars' in sent_features.keys():
-                sent_scalars = sent_features['scalars']
-                feat_dim = sent_scalars.shape[0]
-                sent_scalar_feat = np.hstack([np.zeros((feat_dim, 1)), \
-                        sent_scalars, \
-                        np.zeros((feat_dim, 1))])
-                scalar_features.append(sent_scalar_feat)
-            if 'frames' in sent_features.keys():
-                assert 'partition' in sent_features.keys(), \
-                        ("Must provide partition as a feature")
-                sent_partition = sent_features['partition']
-                sent_frames = sent_features['frames']
-                sent_frame_features = self.process_sent_frames(sent_partition, \
-                        sent_frames)
-                # sent_frame_features: list of [feat_dim, fixed_word_length]
-                sent_frame_features = [torch.Tensor(word_frames.T).unsqueeze(0)\
-                        for word_frames in sent_frame_features]
-                #print([x.shape for x in sent_frame_features])
-                frame_features += sent_frame_features
-        
-        if pause_features:
-            pause_features = torch.LongTensor(pause_features)
-        
-        if frame_features:
-            # need frame feats of shape: [batch, 1, fixed_word_length, feat_dim]
-            # second dimension is num input channel, defaults to 1        
-            frame_features = torch.cat(frame_features, 0)
-            frame_features = frame_features.unsqueeze(1)
-
-        if scalar_features:
-            scalar_features = np.hstack(scalar_features)
-            scalar_features = torch.Tensor(scalar_features)
-        
-        return pause_features, frame_features, scalar_features
-
     
     def _init_weights(self):
         init_module_weights(self.enc2dec_hidden_fc)
@@ -385,14 +280,11 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         X_floor = data["X_floor"]
         X_type_ids, X_attn_masks = data["X_type_ids"], data["X_attn_masks"]
         Y = data["Y"]
-        sent_ids = data["sent_ids"]
-        sfeatures = data["sent_features"]
         batch_size = X_data.size(0) // self.history_len
         
         X = X_data.view(batch_size, self.history_len, -1)
         Xtext = self.word_embedding(X_data, X_type_ids, X_attn_masks)
-        processed_features = self.prep_features(sent_ids, sfeatures)
-        Xspeech = self.speech_encoder(processed_features)
+        Xspeech = self.speech_encoder(data["X_speech"])
         # FIXME
         embedded_inputs = torch.cat([Xtext, Xspeech], 1)
 

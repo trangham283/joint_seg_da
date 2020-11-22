@@ -11,11 +11,14 @@ class SpeechConfig(object):
         # Management
         self.raw_data_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/swda"
         self.task_data_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/joint"
-        self.dataset_path = f"{self.task_data_dir}/dataset.txt"
+        self.dataset_path = f"{self.task_data_dir}"
         self.word_count_path = f"{self.task_data_dir}/word_count.txt"
         self.feature_dir = "/s0/ttmt001/acoustic_features_json"
         self.cache_dir = "/s0/ttmt001"
         self.model_save_path = "/s0/ttmt001/joint_da"
+        self.suffix = "_bert_time_data.json"
+        self.pause_vocab = {"<PAD>": 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 
+                "<START>": 7, "<STOP>": 8}
 
         # data splits
         self.train_dialog_list = f"{self.task_data_dir}/train.txt"
