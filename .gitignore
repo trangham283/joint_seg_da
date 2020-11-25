@@ -5,3 +5,4 @@ condor_logs
 condor_reference.txt
 debug*
 *_bak.py
+.migrate*

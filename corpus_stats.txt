@@ -1,0 +1,37 @@
+With BERT tokenization:
+
+
+TRAIN:
+    # conv: 1,115
+    # turns: 107,849
+    # tokens: 1,617,884
+    # min len: 3
+    # max len: 456
+    # mean len: 17.0
+    # median len: 10
+    # len([x for x in lenstats if x > 45]) = 8,275
+    # len([x for x in lenstats if x > 100]) = 775
+
+DEV:
+    # conv: 21
+    # turns: 1,639
+    # tokens: 28,492
+    # min len: 3
+    # max len: 286
+    # mean len: 19.4
+    # median len: 11
+    # len([x for x in lenstats if x > 45]) = 174
+    # len([x for x in lenstats if x > 100]) = 24
+
+TEST:
+    # conv: 19
+    # turns: 2,360
+    # tokens: 33,026
+    # min len: 3
+    # max len: 184 
+    # mean len: 16.0
+    # median len: 10
+    # len([x for x in lenstats if x > 45]) = 147
+    # len([x for x in lenstats if x > 100]) = 17
+
+

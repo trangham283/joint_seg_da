@@ -37,7 +37,8 @@ def mlog(s, config, LOG_FILE_NAME):
         if not os.path.exists(f"{config.task_data_dir}/log/"):
             os.makedirs(f"{config.task_data_dir}/log/")
 
-        with open(f"{config.task_data_dir}/log/{LOG_FILE_NAME}.log", "a+", encoding="utf-8") as log_f:
+        with open(f"{config.task_data_dir}/log/{LOG_FILE_NAME}.log", "a+", 
+                encoding="utf-8") as log_f:
             log_f.write(s+"\n")
     print(s)
 
@@ -45,11 +46,65 @@ def reslog(s, RES_FILE_NAME):
     if not os.path.exists(f"{config.task_data_dir}/log/"):
         os.makedirs(f"{config.task_data_dir}/log/")
 
-    with open(f"{config.task_data_dir}/log/{RES_FILE_NAME}.res", "a+", encoding="utf-8") as log_f:
+    with open(f"{config.task_data_dir}/log/{RES_FILE_NAME}.res", "a+", 
+            encoding="utf-8") as log_f:
         log_f.write(s+"\n")
+
+def eval_split(data_source, set_name, config, label_tokenizer, 
+        LOG_FILE_NAME, dev_reporter=None, write_pred=False):
+    if write_pred:
+        RES_FILE_NAME = set_name + "_" + LOG_FILE_NAME
+        s = "LABELS\tPREDS"
+        reslog(s, RES_FILE_NAME)
+
+    pred_labels, true_labels = [], []
+    for dialog_idx in data_source.dialog_keys:
+        dialog_frames = data_source.load_frames(dialog_idx)
+        dialog_length = data_source.get_dialog_length(dialog_idx)
+        turn_keys = list(range(dialog_length))
+        for offset in range(0, dialog_length, config.eval_batch_size):
+            turn_idx = turn_keys[offset:offset+config.eval_batch_size]
+            batch_data = data_source.get_batch_features(dialog_idx, dialog_frames, turn_idx)
+            
+            # Forward
+            ret_data, ret_stat = model.evaluate_step(batch_data)
+            if dev_reporter:
+                dev_reporter.update_data(ret_stat)
+            ret_data, ret_stat = model.test_step(batch_data)
+            
+            refs = batch_data["Y"][:, 1:].tolist()
+            hyps = ret_data["symbols"].tolist()
+            for true_label_ids, pred_label_ids in zip(refs, hyps):
+                end_idx = true_label_ids.index(label_tokenizer.eos_token_id)
+                true_syms = [label_tokenizer.id2word[label_id] for label_id in true_label_ids[:end_idx]]
+                pred_syms = [label_tokenizer.id2word[label_id] for label_id in pred_label_ids[:end_idx]]
+                if write_pred:
+                    s = " ".join(true_syms) + "\t" + " ".join(pred_syms) 
+                    reslog(s, RES_FILE_NAME)
+                true_labels.append(true_syms)
+                pred_labels.append(pred_syms)
+
+    log_s = f"\n<Dev> - {time.time()-start_time:.3f}s - "
+    if dev_reporter:
+        log_s += dev_reporter.to_string()
+    mlog(log_s, config, LOG_FILE_NAME)
+    metrics_results = metrics.batch_metrics(true_labels, pred_labels)
+    log_s = \
+        f"\tDSER:            {100*metrics_results['DSER']:.2f}\n" \
+        f"\tseg WER:         {100*metrics_results['strict segmentation error']:.2f}\n" \
+        f"\tDER:             {100*metrics_results['DER']:.2f}\n" \
+        f"\tjoint WER:       {100*metrics_results['strict joint error']:.2f}\n" \
+        f"\tMacro F1:        {100*metrics_results['Macro F1']:.2f}\n" \
+        f"\tMicro F1:        {100*metrics_results['Micro F1']:.2f}\n" \
+        f"\tMacro LWER:      {100*metrics_results['Macro LWER']:.2f}\n" \
+        f"\tMicro LWER:      {100*metrics_results['Micro LWER']:.2f}\n"
+    mlog(log_s, config, LOG_FILE_NAME)
+    current_score = -metrics_results['DER'] + metrics_results['Macro F1']
+    return current_score, metrics_results, dev_reporter
 
 
 def run_train(config):
+
     # tokenizers
     tokenizer = ModBertTokenizer('base', cache_dir=config.cache_dir)
     label_token_dict = {
@@ -73,7 +128,7 @@ def run_train(config):
     LOG_FILE_NAME = "{}.seed_{}.{}".format(
         MODEL_NAME,
         config.seed,
-        #time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        time.strftime("%Y%m%d-%H%M%S", time.localtime())[-6:]
     )
     if config.filename_note:
         LOG_FILE_NAME += f".{config.filename_note}"
@@ -103,9 +158,11 @@ def run_train(config):
     # build model
     if config.model == "bert_attn_ed":
         Model = BertAttnEDSeqLabeler
+    elif config.model == "speech_attn_ed":
+        Model = SpeechAttnEDSeqLabeler
     else:
-        # FIXME: add other models
-        exit(1)
+        print("no model specified")
+        exit(0)
     model = Model(config, tokenizer, label_tokenizer, freeze=config.freeze)
 
     # model adaption
@@ -142,11 +199,12 @@ def run_train(config):
 
     
     # data stats for batching
-    train_dialogs_keys = train_data_source.get_dialog_keys()
-    shuffle_dialogs = list(train_dialogs_keys)
+    train_dialogs_keys = train_data_source.dialog_keys
+    shuffle_dialogs = train_dialogs_keys[:]
 
     # TRAIN
     n_step = 0
+    best_score = -9999
     for epoch in range(1, config.n_epochs+1):
         lr = list(lr_scheduler.optimizer.param_groups)[0]["lr"]
         if lr <= config.min_lr:
@@ -159,10 +217,10 @@ def run_train(config):
             turn_keys = list(range(dialog_length))
             random.shuffle(turn_keys)
             n_batch = 0
-            for offset in range(0, dialog_length, batch_size):
+            for offset in range(0, dialog_length, config.batch_size):
                 model.zero_grad()
                 model.train()
-                turn_idx = turn_keys[offset:offset+batch_size]
+                turn_idx = turn_keys[offset:offset+config.batch_size]
                 batch_data = train_data_source.get_batch_features(dialog_idx, dialog_frames, turn_idx)
                 
                 # Forward
@@ -183,56 +241,26 @@ def run_train(config):
                 # update
                 trn_reporter.update_data(ret_stat)
 
-                # Check loss
-                if n_step > 0 and n_step % config.check_loss_after_n_step == 0:
+                # Check loss and Evaluate on dev dataset
+                if n_step > 0 and n_step % config.validate_after_n_step == 0:
                     log_s = f"{time.time()-start_time:.2f}s Epoch {epoch} batch {n_batch} - "
                     log_s += trn_reporter.to_string()
                     mlog(log_s, config, LOG_FILE_NAME)
                     trn_reporter.clear()
-
-                # Evaluate on dev dataset
-                if n_step > 0 and n_step % config.validate_after_n_step == 0:
                     model.eval()
 
                     log_s = f"<Dev> learning rate: {lr}\n"
                     mlog(log_s, config, LOG_FILE_NAME)
 
-                    pred_labels, true_labels = [], []
-                    dev_data_source.epoch_init(shuffle=False)
-                    while True:
-                        batch_data = dev_data_source.next(config.eval_batch_size)
-                        if batch_data is None:
-                            break
-
-                        ret_data, ret_stat = model.evaluate_step(batch_data)
-                        dev_reporter.update_data(ret_stat)
-                        ret_data, ret_stat = model.test_step(batch_data)
-                        
-                        refs = batch_data["Y"][:, 1:].tolist()
-                        hyps = ret_data["symbols"].tolist()
-                        for true_label_ids, pred_label_ids in zip(refs, hyps):
-                            end_idx = true_label_ids.index(label_tokenizer.eos_token_id)
-                            true_labels.append([label_tokenizer.id2word[label_id] for label_id in true_label_ids[:end_idx]])
-                            pred_labels.append([label_tokenizer.id2word[label_id] for label_id in pred_label_ids[:end_idx]])
-
-                    log_s = f"\n<Dev> - {time.time()-start_time:.3f}s - "
-                    log_s += dev_reporter.to_string()
-                    mlog(log_s, config, LOG_FILE_NAME)
-                    metrics_results = metrics.batch_metrics(true_labels, pred_labels)
+                    current_score, metrics_results, dev_reporter = eval_split(
+                            dev_data_source, "dev", config, label_tokenizer, 
+                            LOG_FILE_NAME,dev_reporter=dev_reporter, 
+                            write_pred=False)
                     experiment.log_metrics(metrics_results)
-                    log_s = \
-                        f"\tDSER:            {100*metrics_results['DSER']:.2f}\n" \
-                        f"\tseg WER:         {100*metrics_results['strict segmentation error']:.2f}\n" \
-                        f"\tDER:             {100*metrics_results['DER']:.2f}\n" \
-                        f"\tjoint WER:       {100*metrics_results['strict joint error']:.2f}\n" \
-                        f"\tMacro F1:        {100*metrics_results['Macro F1']:.2f}\n" \
-                        f"\tMicro F1:        {100*metrics_results['Micro F1']:.2f}\n" \
-                        f"\tMacro LWER:      {100*metrics_results['Macro LWER']:.2f}\n" \
-                        f"\tMicro LWER:      {100*metrics_results['Micro LWER']:.2f}\n"
-                    mlog(log_s, config, LOG_FILE_NAME)
 
                     # Save model if it has better monitor measurement
-                    if config.save_model:
+                    if config.save_model and current_score > best_score:
+                        best_score = current_score
                         if not os.path.exists(f"{config.model_save_path}/model/"):
                             os.makedirs(f"{config.model_save_path}/model/")
 
@@ -253,8 +281,8 @@ def run_train(config):
     # Evaluate on test dataset at the end of training
     mlog("----- EVALUATING at end of training -----", config, LOG_FILE_NAME)
     mlog("----- Loading test data -----", config, LOG_FILE_NAME)
-    test_data_source = TextDataSource(
-        data=dataset["test"],
+    test_data_source = SpeechDataSource(
+        split='test',
         config=config,
         tokenizer=tokenizer,
         label_tokenizer=label_tokenizer
@@ -263,44 +291,13 @@ def run_train(config):
     model.eval()
 
     for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
-        pred_labels, true_labels = [], []
-        data_source.epoch_init(shuffle=False)
-        RES_FILE_NAME = set_name + "_" + LOG_FILE_NAME
-        s = "LABELS\tPREDS"
-        reslog(s, RES_FILE_NAME)
-        while True:
-            batch_data = data_source.next(config.eval_batch_size)
-            if batch_data is None:
-                break
+        current_score, metrics_results, _ = eval_split(data_source, set_name, 
+                config, label_tokenizer, LOG_FILE_NAME, 
+                dev_reporter=None, write_pred=True)
+        lazy_s = f"DSER, DER, F1, LWER:\n {100*metrics_results['DSER']}\t{100*metrics_results['DER']}\t{100*metrics_results['Macro F1']}\t\t{100*metrics_results['Macro LWER']}\n"
+        mlog(lazy_s, config, LOG_FILE_NAME)
 
-            ret_data, ret_stat = model.test_step(batch_data)
-            
-            refs = batch_data["Y"][:, 1:].tolist()
-            hyps = ret_data["symbols"].tolist()
-            for true_label_ids, pred_label_ids in zip(refs, hyps):
-                end_idx = true_label_ids.index(label_tokenizer.eos_token_id)
-                true_syms = [label_tokenizer.id2word[label_id] for label_id in true_label_ids[:end_idx]]
-                pred_syms = [label_tokenizer.id2word[label_id] for label_id in pred_label_ids[:end_idx]]
-                s = " ".join(true_syms) + "\t" + " ".join(pred_syms) 
-                reslog(s, RES_FILE_NAME)
-                true_labels.append(true_syms)
-                pred_labels.append(pred_syms)
-
-        log_s = f"\n<{set_name}> - {time.time()-start_time:.3f}s - "
-        mlog(log_s, config, LOG_FILE_NAME)
-        metrics_results = metrics.batch_metrics(true_labels, pred_labels)
-        log_s = \
-            f"\tDSER:            {100*metrics_results['DSER']:.2f}\n" \
-            f"\tseg WER:         {100*metrics_results['strict segmentation error']:.2f}\n" \
-            f"\tDER:             {100*metrics_results['DER']:.2f}\n" \
-            f"\tjoint WER:       {100*metrics_results['strict joint error']:.2f}\n" \
-            f"\tMacro F1:        {100*metrics_results['Macro F1']:.2f}\n" \
-            f"\tMicro F1:        {100*metrics_results['Micro F1']:.2f}\n" \
-            f"\tMacro LWER:      {100*metrics_results['Macro LWER']:.2f}\n" \
-            f"\tMicro LWER:      {100*metrics_results['Micro LWER']:.2f}\n"
-        mlog(log_s, config, LOG_FILE_NAME)
-
-
+# TODO
 def run_test(config):
     # tokenizers
     tokenizer = ModBertTokenizer('base', cache_dir=config.cache_dir)
@@ -320,80 +317,6 @@ def run_test(config):
     # metrics calculator
     metrics = DAMetrics()
 
-    mlog("----- Loading dev data -----", config, config.LOG_FILE_NAME)
-    dev_data_source = TextDataSource(
-        data=dataset["dev"],
-        config=config,
-        tokenizer=tokenizer,
-        label_tokenizer=label_tokenizer
-    )
-    mlog(str(dev_data_source.statistics), config, config.LOG_FILE_NAME)
-
-    # build model
-    if config.model == "ed":
-        Model = EDSeqLabeler
-    elif config.model == "attn_ed":
-        Model = AttnEDSeqLabeler
-    model = Model(config, tokenizer, label_tokenizer, freeze=config.freeze)
-
-    # model adaption
-    if torch.cuda.is_available():
-        mlog("----- Using GPU -----", config, config.LOG_FILE_NAME)
-        model = model.cuda()
-    if not config.model_path:
-        print("NEED TO PROVIDE PATH")
-        exit(0)
-
-    model.load_model(config.model_path)
-    mlog("----- Model loaded -----", config, config.LOG_FILE_NAME)
-    mlog(f"model path: {config.model_path}", config, config.LOG_FILE_NAME)
-
-    mlog("----- Loading test data -----", config, config.LOG_FILE_NAME)
-    test_data_source = TextDataSource(
-        data=dataset["test"],
-        config=config,
-        tokenizer=tokenizer,
-        label_tokenizer=label_tokenizer
-    )
-    mlog(str(test_data_source.statistics), config, config.LOG_FILE_NAME)
-    model.eval()
-
-    for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
-        pred_labels, true_labels = [], []
-        data_source.epoch_init(shuffle=False)
-        RES_FILE_NAME = set_name + "_" + config.LOG_FILE_NAME
-        s = "LABELS\tPREDS"
-        reslog(s, RES_FILE_NAME)
-        while True:
-            batch_data = data_source.next(config.eval_batch_size)
-            if batch_data is None:
-                break
-
-            ret_data, ret_stat = model.test_step(batch_data)
-            
-            refs = batch_data["Y"][:, 1:].tolist()
-            hyps = ret_data["symbols"].tolist()
-            for true_label_ids, pred_label_ids in zip(refs, hyps):
-                end_idx = true_label_ids.index(label_tokenizer.eos_token_id)
-                true_syms = [label_tokenizer.id2word[label_id] for label_id in true_label_ids[:end_idx]]
-                pred_syms = [label_tokenizer.id2word[label_id] for label_id in pred_label_ids[:end_idx]]
-                s = " ".join(true_syms) + "\t" + " ".join(pred_syms) 
-                reslog(s, RES_FILE_NAME)
-                true_labels.append(true_syms)
-                pred_labels.append(pred_syms)
-
-        log_s = f"\n<{set_name}> - {time.time()-start_time:.3f}s - "
-        mlog(log_s, config, config.LOG_FILE_NAME)
-        metrics_results = metrics.batch_metrics(true_labels, pred_labels)
-        log_s = \
-            f"\tDSER:            {100*metrics_results['DSER']:.2f}\n" \
-            f"\tseg WER:         {100*metrics_results['strict segmentation error']:.2f}\n" \
-            f"\tDER:             {100*metrics_results['DER']:.2f}\n" \
-            f"\tjoint WER:       {100*metrics_results['strict joint error']:.2f}\n" \
-            f"\tMacro F1:        {100*metrics_results['Macro F1']:.2f}\n" \
-            f"\tMicro F1:        {100*metrics_results['Micro F1']:.2f}\n"
-        mlog(log_s, config, config.LOG_FILE_NAME)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -402,14 +325,15 @@ if __name__ == "__main__":
     parser.add_argument("--run_test", type=str2bool, default=False)
 
     # model - architecture
-    parser.add_argument("--model", type=str, default="bert_attn_ed")
+    parser.add_argument("--model", type=str, default="speech_attn_ed")
     parser.add_argument("--rnn_type", type=str, default="gru", 
             help="[gru, lstm]")
     parser.add_argument("--freeze", type=str, default="all", 
             help="[all, pooler_only, top_layer]")
     parser.add_argument("--tie_weights", type=str2bool, default=True, 
             help="tie weights for decoder")
-    parser.add_argument("--attention_type", type=str, default="sent", help="[word, sent]")
+    parser.add_argument("--attention_type", type=str, default="sent", 
+            help="[word, sent]")
 
     # model - numbers
     parser.add_argument("--vocab_size", type=int, default=20000, 
@@ -423,6 +347,19 @@ if __name__ == "__main__":
     parser.add_argument("--n_dial_encoder_layers", type=int, default=1)
     parser.add_argument("--decoder_hidden_dim", type=int, default=200)
     parser.add_argument("--n_decoder_layers", type=int, default=1)
+
+    # speech encoder params
+    parser.add_argument("--d_pause_embedding", type=int, default=2)
+    parser.add_argument("--d_speech", type=int, default=128, 
+            help="speech encoder output dim")
+    parser.add_argument("--fixed_word_length", type=int, default=100)
+    parser.add_argument("--num_conv", type=int, default=32)
+    parser.add_argument("--conv_sizes", type=str, default="5-10-25-50",
+            help="CNN filter widths")
+    parser.add_argument("--downsample", type=str2bool, default=False)
+    parser.add_argument("--feature_types", type=str, 
+            default="pitch,fb3,pause,pause_raw,word_dur")
+
 
     # training
     parser.add_argument("--seed", type=int, default=42, 
@@ -452,7 +389,7 @@ if __name__ == "__main__":
             help="batch size for evaluation")
 
     # inference
-    parser.add_argument("--decode_max_len", type=int, default=45, 
+    parser.add_argument("--decode_max_len", type=int, default=100, 
             help="max utterance length for decoding")
     parser.add_argument("--gen_type", type=str, default="greedy", 
             help="[greedy, sample, top]")
@@ -474,7 +411,7 @@ if __name__ == "__main__":
 
     # load corpus config
     if config.run_train:
-        from swda_utils.config import BertTrainConfig as Config
+        from swda_utils.config import SpeechConfig as Config
     elif config.run_test:
         from test_configs.config import BertTestConfig as Config
     else:
@@ -490,6 +427,12 @@ if __name__ == "__main__":
         if not k.startswith("__") and k not in config.__dict__:
             corpus_config_dict[k] = v
     config.__dict__.update(corpus_config_dict)
+    if "conv_sizes" in config:
+        convs = config.conv_sizes.split('-')
+        convs = [int(x) for x in convs]
+        config.conv_sizes = convs
+    if "feature_types" in config:
+        config.feature_types = config.feature_types.split(',')
 
     # set random seeds
     torch.manual_seed(config.seed)

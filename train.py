@@ -73,7 +73,7 @@ def run_train(config):
     LOG_FILE_NAME = "{}.seed_{}.{}".format(
         MODEL_NAME,
         config.seed,
-        time.strftime("%Y%m%d-%H%M%S", time.localtime())
+        time.strftime("%Y%m%d-%H%M%S", time.localtime())[-6:]
     )
     if config.filename_note:
         LOG_FILE_NAME += f".{config.filename_note}"
@@ -144,6 +144,7 @@ def run_train(config):
 
     # here we go
     n_step = 0
+    best_score = -9999
     for epoch in range(1, config.n_epochs+1):
         lr = list(lr_scheduler.optimizer.param_groups)[0]["lr"]
         if lr <= config.min_lr:
@@ -225,7 +226,10 @@ def run_train(config):
                 mlog(log_s, config, LOG_FILE_NAME)
 
                 # Save model if it has better monitor measurement
-                if config.save_model:
+                current_score = -metrics_results['DER'] + metrics_results['Macro F1']
+                experiment.log_metric("F1-DER", current_score)
+                if config.save_model and current_score > best_score:
+                    best_score = current_score
                     if not os.path.exists(f"{config.model_save_path}/model/"):
                         os.makedirs(f"{config.model_save_path}/model/")
 
@@ -292,6 +296,8 @@ def run_train(config):
             f"\tMacro LWER:      {100*metrics_results['Macro LWER']:.2f}\n" \
             f"\tMicro LWER:      {100*metrics_results['Micro LWER']:.2f}\n"
         mlog(log_s, config, LOG_FILE_NAME)
+        lazy_s = f"DSER, DER, F1, LWER:\n {100*metrics_results['DSER']}\t{100*metrics_results['DER']}\t{100*metrics_results['Macro F1']}\t{100*metrics_results['Macro LWER']}\n"
+        mlog(lazy_s, config, LOG_FILE_NAME)
 
 
 def run_test(config):
@@ -312,80 +318,6 @@ def run_test(config):
 
     # metrics calculator
     metrics = DAMetrics()
-
-    mlog("----- Loading dev data -----", config, config.LOG_FILE_NAME)
-    dev_data_source = TextDataSource(
-        data=dataset["dev"],
-        config=config,
-        tokenizer=tokenizer,
-        label_tokenizer=label_tokenizer
-    )
-    mlog(str(dev_data_source.statistics), config, config.LOG_FILE_NAME)
-
-    # build model
-    if config.model == "ed":
-        Model = EDSeqLabeler
-    elif config.model == "attn_ed":
-        Model = AttnEDSeqLabeler
-    model = Model(config, tokenizer, label_tokenizer, freeze=config.freeze)
-
-    # model adaption
-    if torch.cuda.is_available():
-        mlog("----- Using GPU -----", config, config.LOG_FILE_NAME)
-        model = model.cuda()
-    if not config.model_path:
-        print("NEED TO PROVIDE PATH")
-        exit(0)
-
-    model.load_model(config.model_path)
-    mlog("----- Model loaded -----", config, config.LOG_FILE_NAME)
-    mlog(f"model path: {config.model_path}", config, config.LOG_FILE_NAME)
-
-    mlog("----- Loading test data -----", config, config.LOG_FILE_NAME)
-    test_data_source = TextDataSource(
-        data=dataset["test"],
-        config=config,
-        tokenizer=tokenizer,
-        label_tokenizer=label_tokenizer
-    )
-    mlog(str(test_data_source.statistics), config, config.LOG_FILE_NAME)
-    model.eval()
-
-    for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
-        pred_labels, true_labels = [], []
-        data_source.epoch_init(shuffle=False)
-        RES_FILE_NAME = set_name + "_" + config.LOG_FILE_NAME
-        s = "LABELS\tPREDS"
-        reslog(s, RES_FILE_NAME)
-        while True:
-            batch_data = data_source.next(config.eval_batch_size)
-            if batch_data is None:
-                break
-
-            ret_data, ret_stat = model.test_step(batch_data)
-            
-            refs = batch_data["Y"][:, 1:].tolist()
-            hyps = ret_data["symbols"].tolist()
-            for true_label_ids, pred_label_ids in zip(refs, hyps):
-                end_idx = true_label_ids.index(label_tokenizer.eos_token_id)
-                true_syms = [label_tokenizer.id2word[label_id] for label_id in true_label_ids[:end_idx]]
-                pred_syms = [label_tokenizer.id2word[label_id] for label_id in pred_label_ids[:end_idx]]
-                s = " ".join(true_syms) + "\t" + " ".join(pred_syms) 
-                reslog(s, RES_FILE_NAME)
-                true_labels.append(true_syms)
-                pred_labels.append(pred_syms)
-
-        log_s = f"\n<{set_name}> - {time.time()-start_time:.3f}s - "
-        mlog(log_s, config, config.LOG_FILE_NAME)
-        metrics_results = metrics.batch_metrics(true_labels, pred_labels)
-        log_s = \
-            f"\tDSER:            {100*metrics_results['DSER']:.2f}\n" \
-            f"\tseg WER:         {100*metrics_results['strict segmentation error']:.2f}\n" \
-            f"\tDER:             {100*metrics_results['DER']:.2f}\n" \
-            f"\tjoint WER:       {100*metrics_results['strict joint error']:.2f}\n" \
-            f"\tMacro F1:        {100*metrics_results['Macro F1']:.2f}\n" \
-            f"\tMicro F1:        {100*metrics_results['Micro F1']:.2f}\n"
-        mlog(log_s, config, config.LOG_FILE_NAME)
 
 
 if __name__ == "__main__":
@@ -445,7 +377,7 @@ if __name__ == "__main__":
             help="batch size for evaluation")
 
     # inference
-    parser.add_argument("--decode_max_len", type=int, default=45, 
+    parser.add_argument("--decode_max_len", type=int, default=100, 
             help="max utterance length for decoding")
     parser.add_argument("--gen_type", type=str, default="greedy", 
             help="[greedy, sample, top]")
@@ -467,9 +399,9 @@ if __name__ == "__main__":
 
     # load corpus config
     if config.run_train:
-        from swda_utils.config import BertTrainConfig as Config
+        from swda_utils.config import TrainConfig as Config
     elif config.run_test:
-        from test_configs.config import BertTestConfig as Config
+        from test_configs.config import TestConfig as Config
     else:
         print("Need to choose run train or run test; Exiting")
         exit(0)

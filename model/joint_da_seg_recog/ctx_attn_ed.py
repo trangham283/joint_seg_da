@@ -11,6 +11,7 @@ from model.modules.submodules import RelFloorEmbEncoder
 from model.modules.utils import init_module_weights, init_word_embedding
 
 from transformers import BertModel, BertTokenizer
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class BertEmbedder(nn.Module):
     def __init__(self, model_size="bert-base-uncased", 
@@ -47,36 +48,45 @@ class BertEmbedder(nn.Module):
 
 class SpeechFeatureEncoder(nn.Module):
     def __init__(self,
-            feature_sizes,
-            d_out,
+            feature_types, feat_sizes, d_out,
             conv_sizes=[5, 10, 25, 50],
             num_conv=32,
             d_pause_embedding=4,  
+            pause_vocab_len=9,
+            fixed_word_length=100,
             speech_dropout=0.0):
         super().__init__()
 
         self.d_pause_embedding = d_pause_embedding
         self.d_out = d_out
         self.speech_dropout = nn.Dropout(speech_dropout)
-        self.feature_sizes = feature_sizes
+        self.feature_types = feature_types
+        self.feat_sizes = feat_sizes
         self.d_in = 0
+        self.d_scalars = 0
         self.num_conv = num_conv
         self.conv_sizes = conv_sizes
+        self.word_length = fixed_word_length
 
-        if 'pause' in feature_sizes.keys():
-            self.emb = nn.Embedding(self.feature_sizes['pause'], \
+        all_frame_feats = set(self.feat_sizes.keys())
+        frame_feats = all_frame_feats.intersection(set(self.feature_types))
+        self.frame_feats = frame_feats
+
+        if 'pause' in self.feature_types:
+            self.emb = nn.Embedding(pause_vocab_len, \
                     self.d_pause_embedding)
-            self.d_in += self.d_pause_embedding
+            self.d_in += 2*self.d_pause_embedding
 
-        if 'frames' in feature_sizes.keys():
+        if frame_feats:
             conv_modules = []
-            feat_dim = feature_sizes['frames']
-            word_length = feature_sizes['word_length']
-            for filter_size in conv_sizes:
+            feat_dim = 0
+            for feat in frame_feats:
+                feat_dim += self.feat_sizes[feat]
+            for filter_size in self.conv_sizes:
                 kernel_size = (filter_size, feat_dim)
-                pool_kernel = (word_length - filter_size + 1, 1)
+                pool_kernel = (self.word_length - filter_size + 1, 1)
                 filter_conv = nn.Sequential(
-                        nn.Conv2d(1, num_conv, kernel_size),
+                        nn.Conv2d(1, self.num_conv, kernel_size),
                         nn.ReLU(),
                         nn.MaxPool2d(pool_kernel, 1)
                         )
@@ -87,31 +97,46 @@ class SpeechFeatureEncoder(nn.Module):
             self.d_conv = self.num_conv * len(self.conv_sizes)
             self.d_in += self.d_conv
 
-        if 'scalars' in feature_sizes.keys():
-            self.d_scalars = self.feature_sizes['scalars']
-            self.d_in += self.d_scalars
+        if 'pause_raw' in self.feature_types:
+            self.d_scalars += 2
+            self.d_in += 2
+
+        if 'word_dur' in self.feature_types:
+            self.d_scalars += 2
+            self.d_in += 2
 
         self.speech_projection = nn.Linear(self.d_in, self.d_out, bias=True)
 
     def forward(self, processed_features):
         pause_features, frame_features, scalar_features = processed_features
-        #print("Frame shape", frame_features.shape)
+        pause_before, pause_after = pause_features
+        rp, wd = scalar_features
         all_features = []
-        if len(pause_features) > 0:
-            all_features.append(self.emb(pause_features))
-        if len(scalar_features) > 0:
-            all_features.append(scalar_features.transpose(0, 1))
-        if len(frame_features) > 0:
-            conv_outputs = [convolve(frame_features) for \
-                    convolve in self.conv_modules]
-            conv_outputs = [x.squeeze(-1).squeeze(-1) for x in conv_outputs]
-            conv_outputs = torch.cat(conv_outputs, -1)
-            assert conv_outputs.shape[1] == self.d_conv
-            all_features.append(conv_outputs)
-            #print("conv outputs", conv_outputs.shape)
+        if "pause" in self.feature_types:
+            all_features.append(self.emb(pause_before))
+            all_features.append(self.emb(pause_after))
+
+        if 'pause_raw' in self.feature_types:
+            all_features.append(rp.transpose(1, 2))
+
+        if 'word_dur' in self.feature_types:
+            all_features.append(wd.transpose(1, 2))
         
+        if self.frame_feats:
+            ttff = torch.Tensor(frame_features).to(DEVICE)
+            ttff = ttff.transpose(0, 1).unsqueeze(2)
+            sp_inputs = list(ttff)
+            seq = []
+            for word in sp_inputs:
+                conv_outputs = [convolve(word) for convolve in self.conv_modules]
+                conv_outputs = [x.squeeze(-1).squeeze(-1) for x in conv_outputs]
+                conv_outputs = torch.cat(conv_outputs, -1).unsqueeze(0)
+                seq.append(conv_outputs)
+
+            sp_out = torch.cat(seq, 0).transpose(0, 1)
+            all_features.append(sp_out)
+
         all_features = torch.cat(all_features, -1)
-        assert all_features.shape[1] == self.d_in
         res = self.speech_dropout(self.speech_projection(all_features))
         return res
 
@@ -119,14 +144,17 @@ class SpeechAttnEDSeqLabeler(nn.Module):
     def __init__(self, config, tokenizer, label_tokenizer, 
             model_size="bert-base-uncased", 
             cache_dir="/s0/ttmt001", freeze='all'):
-        super(BertAttnEDSeqLabeler, self).__init__()
+        super(SpeechAttnEDSeqLabeler, self).__init__()
 
         # Attributes
-        # Attributes from config
-        self.conv_sizes = config.conv_sizes
-        self.d_pause_embedding = config.d_pause_embedding
-        seld.d_speech = config.d_speech
         self.feature_types = config.feature_types
+        self.feat_sizes = config.feat_sizes
+        self.conv_sizes = config.conv_sizes
+        self.num_conv = config.num_conv
+        self.d_pause_embedding = config.d_pause_embedding
+        self.pause_vocab = config.pause_vocab
+        self.d_speech = config.d_speech
+        self.fixed_word_length = config.fixed_word_length
 
         self.dial_encoder_hidden_dim = config.dial_encoder_hidden_dim
         self.n_dial_encoder_layers = config.n_dial_encoder_layers
@@ -148,7 +176,6 @@ class SpeechAttnEDSeqLabeler(nn.Module):
 
         # Optional attributes from config
         self.dropout = config.dropout if hasattr(config, "dropout") else 0.0
-        self.use_pretrained_word_embedding = config.use_pretrained_word_embedding if hasattr(config, "use_pretrained_word_embedding") else False
 
         # Bert specific args
         self.word_embedding = BertEmbedder(model_size, cache_dir=cache_dir, 
@@ -167,16 +194,19 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         self.bos_label_id = label_tokenizer.bos_token_id
         self.eos_label_id = label_tokenizer.eos_token_id
 
-
         # Encoding components
         self.speech_encoder = SpeechFeatureEncoder(
-                self.feature_sizes,
-                self.d_speech, 
-                conv_sizes = self.conv_sizes,
-                d_pause_embedding=self.d_pause_emb)
+            self.feature_types, self.feat_sizes,
+            self.d_speech, 
+            conv_sizes=self.conv_sizes,
+            num_conv=self.num_conv,
+            d_pause_embedding=self.d_pause_embedding,
+            pause_vocab_len=len(self.pause_vocab),
+            fixed_word_length=self.fixed_word_length,
+            speech_dropout=self.dropout)
 
         self.sent_encoder = EncoderRNN(
-            input_dim=self.word_embedding_dim,
+            input_dim=self.word_embedding_dim  + self.d_speech,
             hidden_dim=self.sent_encoder_hidden_dim,
             n_layers=self.n_sent_encoder_layers,
             dropout_emb=self.dropout,
@@ -277,26 +307,21 @@ class SpeechAttnEDSeqLabeler(nn.Module):
     # FIXME
     def _encode(self, data):
         X_data = data["X"]
-        X_floor = data["X_floor"]
-        X_type_ids, X_attn_masks = data["X_type_ids"], data["X_attn_masks"]
-        Y = data["Y"]
         batch_size = X_data.size(0) // self.history_len
-        
         X = X_data.view(batch_size, self.history_len, -1)
+        X_type_ids = data["X_type_ids"] 
+        X_attn_masks = data["X_attn_masks"]
+        input_floors = data["X_floor"]
         Xtext = self.word_embedding(X_data, X_type_ids, X_attn_masks)
+        
         Xspeech = self.speech_encoder(data["X_speech"])
-        # FIXME
-        embedded_inputs = torch.cat([Xtext, Xspeech], 1)
+        embedded_inputs = torch.cat([Xtext, Xspeech], -1)
 
-        Y_in = Y[:, :-1].contiguous()
-        Y_out = Y[:, 1:].contiguous()
-        max_y_len = Y_out.size(1)
         max_sent_len = X.size(-1)
 
         input_lens = (X != self.pad_token_id).sum(-1)
         dial_lens = (input_lens > 0).long().sum(1)  # equals number of non-padding sents
-        flat_inputs = inputs.view(batch_size*history_len, max_sent_len)
-        flat_input_lens = input_lens.view(batch_size*history_len)
+        flat_input_lens = input_lens.view(batch_size*self.history_len)
 
         word_encodings, _, sent_encodings = self.sent_encoder(embedded_inputs, 
                 flat_input_lens)
@@ -367,6 +392,13 @@ class SpeechAttnEDSeqLabeler(nn.Module):
     def train_step(self, data):
         # Forward
         word_encodings, sent_encodings, dial_encodings, tgt_word_encodings, batch_size = self._encode(data)
+        X_data = data["X"]
+        X = X_data.view(batch_size, self.history_len, -1)
+        Y = data["Y"]
+        Y_in = Y[:, :-1].contiguous()
+        Y_out = Y[:, 1:].contiguous()
+        max_y_len = Y_out.size(1)
+
         if self.attention_type == "word":
             attn_keys = word_encodings.view(batch_size, -1, word_encodings.size(-1))
             attn_mask = self._get_attn_mask(X).view(batch_size, -1)
@@ -407,6 +439,13 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         with torch.no_grad():
             # Forward
             word_encodings, sent_encodings, dial_encodings, tgt_word_encodings, batch_size = self._encode(data)
+            X_data = data["X"]
+            X = X_data.view(batch_size, self.history_len, -1)
+            Y = data["Y"]
+            Y_in = Y[:, :-1].contiguous()
+            Y_out = Y[:, 1:].contiguous()
+            max_y_len = Y_out.size(1)
+
             if self.attention_type == "word":
                 attn_keys = word_encodings.view(batch_size, -1, word_encodings.size(-1))
                 attn_mask = self._get_attn_mask(X).view(batch_size, -1)
@@ -446,6 +485,9 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         with torch.no_grad():
             # Forward
             word_encodings, sent_encodings, dial_encodings, tgt_word_encodings, batch_size = self._encode(data)
+            X_data = data["X"]
+            X = X_data.view(batch_size, self.history_len, -1)
+
             if self.attention_type == "word":
                 attn_keys = word_encodings.view(batch_size, -1, word_encodings.size(-1))
                 attn_mask = self._get_attn_mask(X).view(batch_size, -1)
