@@ -51,7 +51,7 @@ def reslog(s, RES_FILE_NAME):
         log_f.write(s+"\n")
 
 def eval_split(model, data_source, set_name, config, label_tokenizer, 
-        LOG_FILE_NAME, dev_reporter=None, write_pred=False):
+        metrics, LOG_FILE_NAME, dev_reporter=None, write_pred=False):
     if write_pred:
         RES_FILE_NAME = set_name + "_" + LOG_FILE_NAME
         s = "LABELS\tPREDS"
@@ -84,7 +84,7 @@ def eval_split(model, data_source, set_name, config, label_tokenizer,
                 true_labels.append(true_syms)
                 pred_labels.append(pred_syms)
 
-    log_s = f"\n<Dev> - Results - "
+    log_s = f"\nSplit: {set_name} - Results - "
     if dev_reporter:
         log_s += dev_reporter.to_string()
     mlog(log_s, config, LOG_FILE_NAME)
@@ -217,6 +217,10 @@ def run_train(config):
             dialog_length = train_data_source.get_dialog_length(dialog_idx)
             turn_keys = list(range(dialog_length))
             random.shuffle(turn_keys)
+
+            # NOTE: DEBUG
+            # if n_step> 30: break
+            
             for offset in range(0, dialog_length, config.batch_size):
                 model.zero_grad()
                 model.train()
@@ -258,22 +262,24 @@ def run_train(config):
 
                     current_score, metrics_results, dev_reporter = eval_split(
                             model, dev_data_source, "dev", 
-                            config, label_tokenizer, 
+                            config, label_tokenizer, metrics, 
                             LOG_FILE_NAME,dev_reporter=dev_reporter, 
                             write_pred=False)
                     experiment.log_metrics(metrics_results)
 
                     # Save model if it has better monitor measurement
-                    if config.save_model and current_score > best_score:
+                    if current_score > best_score:
                         best_score = current_score
-                        if not os.path.exists(f"{config.model_save_path}/model/"):
-                            os.makedirs(f"{config.model_save_path}/model/")
+                        if config.save_model:
+                            this_model_path = f"{config.model_save_path}/model/"
+                            if not os.path.exists(this_model_path):
+                                os.makedirs(this_model_path)
 
-                        torch.save(model.state_dict(), f"{config.model_save_path}/model/{LOG_FILE_NAME}.model.pt")
-                        mlog(f"model saved to {config.model_save_path}/model/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
+                            torch.save(model.state_dict(), f"{this_model_path}/{LOG_FILE_NAME}.model.pt")
+                            mlog(f"model saved to {this_model_path}/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
 
-                        if torch.cuda.is_available():
-                            model = model.cuda()
+                            #if torch.cuda.is_available():
+                            #    model = model.cuda()
 
                     # Decay learning rate
                     lr_scheduler.step(dev_reporter.get_value("monitor"))
@@ -282,6 +288,7 @@ def run_train(config):
                 # Finished a step
                 n_batch += 1
                 n_step += 1
+
         
     # Evaluate on test dataset at the end of training
     mlog("----- EVALUATING at end of training -----", config, LOG_FILE_NAME)
@@ -296,9 +303,12 @@ def run_train(config):
     model.eval()
 
     for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
-        current_score, metrics_results, _ = eval_split(model, data_source, 
-                set_name, config, label_tokenizer, LOG_FILE_NAME, 
-                dev_reporter=None, write_pred=True)
+        current_score, metrics_results, dev_reporter = eval_split(
+                model, dev_data_source, set_name, 
+                config, label_tokenizer, metrics, 
+                LOG_FILE_NAME, dev_reporter=None, 
+                write_pred=True)
+
         lazy_s = f"DSER, DER, F1, LWER:\n {100*metrics_results['DSER']}\t{100*metrics_results['DER']}\t{100*metrics_results['Macro F1']}\t\t{100*metrics_results['Macro LWER']}\n"
         mlog(lazy_s, config, LOG_FILE_NAME)
 
