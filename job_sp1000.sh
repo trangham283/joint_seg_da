@@ -18,7 +18,7 @@ python train_sp.py \
     --d_speech 128 \
     --downsample False \
     --num_conv 32 \
-    --conv_sizes 5-10-25-50 \
+    --conv_sizes "5,10,25,50" \
     --feature_types "pitch,fb3,pause,pause_raw,word_dur" \
     --fixed_word_length 100 \
     --freeze "all" \
@@ -33,6 +33,6 @@ python train_sp.py \
     --rnn_type gru \
     --history_len ${history_len} \
     --gen_type ${gen_type} \
-    --top_k 10 --n_epochs 2 \
+    --top_k 10 --n_epochs 15 \
     --filename_note sp1000 
 

@@ -82,6 +82,8 @@ class SpeechFeatureEncoder(nn.Module):
             feat_dim = 0
             for feat in frame_feats:
                 feat_dim += self.feat_sizes[feat]
+            self.feat_dim = feat_dim
+
             for filter_size in self.conv_sizes:
                 kernel_size = (filter_size, feat_dim)
                 pool_kernel = (self.word_length - filter_size + 1, 1)
@@ -121,20 +123,32 @@ class SpeechFeatureEncoder(nn.Module):
 
         if 'word_dur' in self.feature_types:
             all_features.append(wd.transpose(1, 2))
-        
+       
+        # Documenting all this dimension finessing is probably futile,
+        # and it's not like I'd trust myself enough not to test things out 
+        # line by line anyway...
         if self.frame_feats:
             ttff = torch.Tensor(frame_features).to(DEVICE)
-            ttff = ttff.transpose(0, 1).unsqueeze(2)
-            sp_inputs = list(ttff)
-            seq = []
-            for word in sp_inputs:
-                conv_outputs = [convolve(word) for convolve in self.conv_modules]
-                conv_outputs = [x.squeeze(-1).squeeze(-1) for x in conv_outputs]
-                conv_outputs = torch.cat(conv_outputs, -1).unsqueeze(0)
-                seq.append(conv_outputs)
-
-            sp_out = torch.cat(seq, 0).transpose(0, 1)
+            
+            batch_size = ttff.size(0)
+            seq_len = ttff.size(1)
+            inputs = ttff.view(batch_size*seq_len, self.word_length, self.feat_dim).unsqueeze(1)
+            conv_outputs = [convolve(inputs) for convolve in self.conv_modules]
+            conv_outputs = [x.squeeze(-1).squeeze(-1) for x in conv_outputs]
+            conv_outputs = [x.view(batch_size, seq_len, -1) for x in conv_outputs]
+            sp_out = torch.cat(conv_outputs, -1)
             all_features.append(sp_out)
+            
+            #ttff = ttff.transpose(0, 1).unsqueeze(2)
+            #sp_inputs = list(ttff)
+            #seq = []
+            #for word in sp_inputs:
+            #    conv_outputs = [convolve(word) for convolve in self.conv_modules]
+            #    conv_outputs = [x.squeeze(-1).squeeze(-1) for x in conv_outputs]
+            #    conv_outputs = torch.cat(conv_outputs, -1).unsqueeze(0)
+            #    seq.append(conv_outputs)
+            #sp_out = torch.cat(seq, 0).transpose(0, 1)
+            #all_features.append(sp_out)
 
         all_features = torch.cat(all_features, -1)
         res = self.speech_dropout(self.speech_projection(all_features))

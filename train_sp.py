@@ -218,8 +218,8 @@ def run_train(config):
             turn_keys = list(range(dialog_length))
             random.shuffle(turn_keys)
 
-            # NOTE: DEBUG
-            # if n_step> 30: break
+            if config.debug and n_step > 30: 
+                break
             
             for offset in range(0, dialog_length, config.batch_size):
                 model.zero_grad()
@@ -369,7 +369,7 @@ if __name__ == "__main__":
             help="speech encoder output dim")
     parser.add_argument("--fixed_word_length", type=int, default=100)
     parser.add_argument("--num_conv", type=int, default=32)
-    parser.add_argument("--conv_sizes", type=str, default="5-10-25-50",
+    parser.add_argument("--conv_sizes", type=str, default="5,10,25,50",
             help="CNN filter widths")
     parser.add_argument("--downsample", type=str2bool, default=False)
     parser.add_argument("--feature_types", type=str, 
@@ -414,6 +414,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=0.0)
 
     # management
+    parser.add_argument("--debug", type=str2bool, default=False)
     parser.add_argument("--model_path", help="path to model")
     parser.add_argument("--corpus", type=str, default="swda", help="[swda]")
     parser.add_argument("--enable_log", type=str2bool, default=True)
@@ -443,7 +444,7 @@ if __name__ == "__main__":
             corpus_config_dict[k] = v
     config.__dict__.update(corpus_config_dict)
     if "conv_sizes" in config:
-        convs = config.conv_sizes.split('-')
+        convs = config.conv_sizes.split(',')
         convs = [int(x) for x in convs]
         config.conv_sizes = convs
     if "feature_types" in config:
