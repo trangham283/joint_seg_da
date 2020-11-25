@@ -50,7 +50,7 @@ def reslog(s, RES_FILE_NAME):
             encoding="utf-8") as log_f:
         log_f.write(s+"\n")
 
-def eval_split(data_source, set_name, config, label_tokenizer, 
+def eval_split(model, data_source, set_name, config, label_tokenizer, 
         LOG_FILE_NAME, dev_reporter=None, write_pred=False):
     if write_pred:
         RES_FILE_NAME = set_name + "_" + LOG_FILE_NAME
@@ -84,7 +84,7 @@ def eval_split(data_source, set_name, config, label_tokenizer,
                 true_labels.append(true_syms)
                 pred_labels.append(pred_syms)
 
-    log_s = f"\n<Dev> - {time.time()-start_time:.3f}s - "
+    log_s = f"\n<Dev> - Results - "
     if dev_reporter:
         log_s += dev_reporter.to_string()
     mlog(log_s, config, LOG_FILE_NAME)
@@ -211,12 +211,12 @@ def run_train(config):
             break
 
         random.shuffle(shuffle_dialogs)
+        n_batch = 0
         for dialog_idx in shuffle_dialogs:
             dialog_frames = train_data_source.load_frames(dialog_idx)
             dialog_length = train_data_source.get_dialog_length(dialog_idx)
             turn_keys = list(range(dialog_length))
             random.shuffle(turn_keys)
-            n_batch = 0
             for offset in range(0, dialog_length, config.batch_size):
                 model.zero_grad()
                 model.train()
@@ -242,18 +242,23 @@ def run_train(config):
                 trn_reporter.update_data(ret_stat)
 
                 # Check loss and Evaluate on dev dataset
-                if n_step > 0 and n_step % config.validate_after_n_step == 0:
+                # Check loss
+                if n_step > 0 and n_step % config.check_loss_after_n_step == 0:
                     log_s = f"{time.time()-start_time:.2f}s Epoch {epoch} batch {n_batch} - "
                     log_s += trn_reporter.to_string()
                     mlog(log_s, config, LOG_FILE_NAME)
                     trn_reporter.clear()
+
+                # evaluate 
+                if n_step > 0 and n_step % config.validate_after_n_step == 0:
                     model.eval()
 
                     log_s = f"<Dev> learning rate: {lr}\n"
                     mlog(log_s, config, LOG_FILE_NAME)
 
                     current_score, metrics_results, dev_reporter = eval_split(
-                            dev_data_source, "dev", config, label_tokenizer, 
+                            model, dev_data_source, "dev", 
+                            config, label_tokenizer, 
                             LOG_FILE_NAME,dev_reporter=dev_reporter, 
                             write_pred=False)
                     experiment.log_metrics(metrics_results)
@@ -291,8 +296,8 @@ def run_train(config):
     model.eval()
 
     for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
-        current_score, metrics_results, _ = eval_split(data_source, set_name, 
-                config, label_tokenizer, LOG_FILE_NAME, 
+        current_score, metrics_results, _ = eval_split(model, data_source, 
+                set_name, config, label_tokenizer, LOG_FILE_NAME, 
                 dev_reporter=None, write_pred=True)
         lazy_s = f"DSER, DER, F1, LWER:\n {100*metrics_results['DSER']}\t{100*metrics_results['DER']}\t{100*metrics_results['Macro F1']}\t\t{100*metrics_results['Macro LWER']}\n"
         mlog(lazy_s, config, LOG_FILE_NAME)
