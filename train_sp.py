@@ -59,10 +59,17 @@ def eval_split(model, data_source, set_name, config, label_tokenizer,
 
     pred_labels, true_labels = [], []
     for dialog_idx in data_source.dialog_keys:
-        dialog_frames = data_source.load_frames(dialog_idx)
+        if config.frame_features:
+            dialog_frames = data_source.load_frames(dialog_idx)
+        else:
+            dialog_frames = []
         dialog_length = data_source.get_dialog_length(dialog_idx)
         turn_keys = list(range(dialog_length))
         for offset in range(0, dialog_length, config.eval_batch_size):
+            if config.debug:
+                print(offset, dialog_idx)
+                if offset > 5:
+                    return 0, {}, dev_reporter
             turn_idx = turn_keys[offset:offset+config.eval_batch_size]
             batch_data = data_source.get_batch_features(dialog_idx, dialog_frames, turn_idx)
             
@@ -133,6 +140,7 @@ def run_train(config):
     if config.filename_note:
         LOG_FILE_NAME += f".{config.filename_note}"
         experiment.set_name(config.filename_note)
+    experiment.log_text(LOG_FILE_NAME)
 
     # data loaders & number reporters
     trn_reporter = StatisticsReporter()
@@ -213,7 +221,10 @@ def run_train(config):
         random.shuffle(shuffle_dialogs)
         n_batch = 0
         for dialog_idx in shuffle_dialogs:
-            dialog_frames = train_data_source.load_frames(dialog_idx)
+            if config.frame_features:
+                dialog_frames = train_data_source.load_frames(dialog_idx)
+            else:
+                dialog_frames = []
             dialog_length = train_data_source.get_dialog_length(dialog_idx)
             turn_keys = list(range(dialog_length))
             random.shuffle(turn_keys)
@@ -265,13 +276,14 @@ def run_train(config):
                             config, label_tokenizer, metrics, 
                             LOG_FILE_NAME,dev_reporter=dev_reporter, 
                             write_pred=False)
-                    experiment.log_metrics(metrics_results)
+                    if not config.debug:
+                        experiment.log_metrics(metrics_results)
 
                     # Save model if it has better monitor measurement
                     if current_score > best_score:
                         best_score = current_score
                         if config.save_model:
-                            this_model_path = f"{config.model_save_path}/model/"
+                            this_model_path = f"{config.model_save_path}/model"
                             if not os.path.exists(this_model_path):
                                 os.makedirs(this_model_path)
 
@@ -300,11 +312,18 @@ def run_train(config):
         label_tokenizer=label_tokenizer
     )
     mlog(str(test_data_source.statistics), config, LOG_FILE_NAME)
+    if config.save_model:
+        model_path = f"{this_model_path}/{LOG_FILE_NAME}.model.pt"
+        model.load_model(model_path)
+        print(f"model path: {model_path}")
     model.eval()
+
+    #if config.debug:
+    #    exit(0)
 
     for set_name, data_source in [("DEV", dev_data_source), ("TEST", test_data_source)]:
         current_score, metrics_results, dev_reporter = eval_split(
-                model, dev_data_source, set_name, 
+                model, data_source, set_name, 
                 config, label_tokenizer, metrics, 
                 LOG_FILE_NAME, dev_reporter=None, 
                 write_pred=True)
@@ -372,8 +391,8 @@ if __name__ == "__main__":
     parser.add_argument("--conv_sizes", type=str, default="5,10,25,50",
             help="CNN filter widths")
     parser.add_argument("--downsample", type=str2bool, default=False)
-    parser.add_argument("--feature_types", type=str, 
-            default="pitch,fb3,pause,pause_raw,word_dur")
+    parser.add_argument("--feature_types", type=str, default=None)
+            
 
 
     # training
@@ -447,8 +466,15 @@ if __name__ == "__main__":
         convs = config.conv_sizes.split(',')
         convs = [int(x) for x in convs]
         config.conv_sizes = convs
-    if "feature_types" in config:
+    
+    frame_feat_types = set(["pitch", "mfcc", "fbank", "fb3"])
+    if config.feature_types is not None:
         config.feature_types = config.feature_types.split(',')
+        print(config.feature_types)
+        config.frame_features = frame_feat_types.intersection(set(config.feature_types))
+    else:
+        config.feature_types = []
+        config.frame_features = []
 
     # set random seeds
     torch.manual_seed(config.seed)

@@ -24,7 +24,7 @@ class SpeechDataSource():
         # Attributes from config
         frame_feat_types = set(["pitch", "mfcc", "fbank", "fb3"])
         self.feature_types = config.feature_types
-        self.frame_features = frame_feat_types.intersection(set(self.feature_types))
+        self.frame_features = frame_feat_types.intersection(set(self.feature_types)) 
         self.split = split
         self.suffix = config.suffix
         self.dataset_path = config.dataset_path
@@ -158,33 +158,56 @@ class SpeechDataSource():
                 self.statistics["n_tokens"] += len(tokens)
                 floor = turn["speaker"]
                 turn_labels = turn["joint_labels"]
+                bound_labels = []
+                for x in turn_labels:
+                    if x == "I":
+                        bound_labels.append(0)
+                    else:
+                        bound_labels.append(1)
                 turn_tokens = [self.tokenizer.cls_token] + \
                         tokens + [self.tokenizer.sep_token]
                 turn_token_ids = self.tokenizer.convert_tokens_to_ids(\
                         turn_tokens)
+                bound_label_ids = [self.bos_label_id] + bound_labels + [self.eos_label_id]
                 turn_label_ids = [self.bos_label_id] + [self.label_tokenizer.word2id[label] for label in turn_labels] + [self.eos_label_id]
                 turn_floor_id = ["A", "B"].index(floor)
-                pause_before = [self.pause_vocab["<START>"]] + \
+                if "pause" in self.feature_types:
+                    pause_before = [self.pause_vocab["<START>"]] + \
                         [self.pause_vocab[i] for i in turn['pause_before']] + \
                         [self.pause_vocab["<STOP>"]]
-                pause_after = [self.pause_vocab["<START>"]] + \
+                    pause_after = [self.pause_vocab["<START>"]] + \
                         [self.pause_vocab[i] for i in turn['pause_after']] + \
                         [self.pause_vocab["<STOP>"]]
+                else:
+                    pause_before = []
+                    pause_after = []
                 # use first and last for START & STOP
-                partitions = [turn['partition'][0]] + \
+                if self.frame_features:
+                    partitions = [turn['partition'][0]] + \
                         turn['partition'] + [turn['partition'][-1]]
-                if self.downsample:
-                    partitions = [(x//2, y//2) for x,y in partitions]
-                pauses_raw = np.array([turn['rp_before'], turn['rp_after']])
-                pauses_raw = np.hstack([np.zeros((2, 1)),\
-                        pauses_raw, np.zeros((2, 1))])
-                word_durations = np.array([turn['dur_mean'], turn['dur_max']])
-                word_durations = np.hstack([np.zeros((2, 1)), \
+                    if self.downsample:
+                        partitions = [(x//2, y//2) for x,y in partitions]
+                else:
+                    partitions = []
+                if "pause_raw" in self.feature_types:
+                    pauses_raw = np.array([turn['rp_before'], turn['rp_after']])
+                    pauses_raw = np.hstack([np.zeros((2, 1)),\
+                            pauses_raw, np.zeros((2, 1))])
+                else:
+                    pauses_raw = []
+                if "word_dur" in self.feature_types:
+                    word_durations = np.array([turn['dur_mean'], 
+                        turn['dur_max']])
+                    word_durations = np.hstack([np.zeros((2, 1)), 
                         word_durations, np.zeros((2, 1))])
+                else:
+                    word_durations = []
+
 
                 processed_sessions[filenumstr].append({
                     "token_ids": turn_token_ids,
                     "label_ids": turn_label_ids,
+                    "bound_ids": bound_label_ids,
                     "floor_id": turn_floor_id,
                     "pause_before_ids": pause_before,
                     "pause_after_ids": pause_after,
@@ -207,7 +230,7 @@ class SpeechDataSource():
     # already loaded
     def get_batch_features(self, dialog_key, all_dialog_frames, turn_indices):
         # batch features
-        X, Y, X_floor = [], [], []
+        X, Y, X_floor, Y_B = [], [], [], []
         X_frames, X_pb, X_pf = [], [], []
         X_rp, X_wd = [], []
 
@@ -226,16 +249,21 @@ class SpeechDataSource():
             for segment in segments:
                 this_X.append(segment["token_ids"])
                 this_X_floor.append(segment["floor_id"])
-                side = np.array(all_dialog_frames[segment["floor_id"]]).T
-                seg_frames = self.process_sent_frames(segment["partitions"], side)
-                seg_frames = [word_frames.T for word_frames in seg_frames]
-                this_frames.append(seg_frames)
-                this_pb.append(segment["pause_before_ids"]) 
-                this_pf.append(segment["pause_after_ids"])
-                this_rp.append(segment["pauses_raw"])
-                this_wd.append(segment["word_durations"])
+                if self.frame_features:
+                    side = np.array(all_dialog_frames[segment["floor_id"]]).T
+                    seg_frames = self.process_sent_frames(segment["partitions"], side)
+                    seg_frames = [word_frames.T for word_frames in seg_frames]
+                    this_frames.append(seg_frames)
+                if "pause" in self.feature_types:
+                    this_pb.append(segment["pause_before_ids"]) 
+                    this_pf.append(segment["pause_after_ids"])
+                if "pause_raw" in self.feature_types:
+                    this_rp.append(segment["pauses_raw"])
+                if "word_dur" in self.feature_types:
+                    this_wd.append(segment["word_durations"])
             segment = segments[-1]
             Y.append(segment["label_ids"])
+            Y_B.append(segment["bound_ids"])
             # Then padding segments
             for _ in range(self.history_len-len(segments)):
                 this_X.insert(0, empty_ids)
@@ -252,28 +280,52 @@ class SpeechDataSource():
             X_pb += this_pb
             X_pf += this_pf
             X_rp += this_rp
-            X_wd += this_rp
+            X_wd += this_wd
 
         X_ba = self.tokenizer.convert_batch_ids_to_tensor(X, self.history_len)
         X, X_type_ids, X_attn_masks = X_ba
         max_segment_len = X.size(1)
         batch_size = len(turn_indices)
-        padded_pb = [ids + [self.tokenizer.pad_token_id]*(max_segment_len-len(ids)) for ids in X_pb]
-        padded_pf = [ids + [self.tokenizer.pad_token_id]*(max_segment_len-len(ids)) for ids in X_pf]
-        padded_rp = [np.hstack([feats, np.zeros((2, max_segment_len-feats.shape[1]))]) for feats in X_rp]
-        padded_wd = [np.hstack([feats, np.zeros((2, max_segment_len-feats.shape[1]))]) for feats in X_wd]
-        padded_frames = [feats + [np.zeros((self.fixed_word_length, self.feat_dim))]*(max_segment_len-len(feats)) for feats in X_frames]
+        if "pause" in self.feature_types:
+            padded_pb = [ids + 
+                [self.tokenizer.pad_token_id]*(max_segment_len-len(ids)) 
+                for ids in X_pb]
+            padded_pf = [ids + 
+                [self.tokenizer.pad_token_id]*(max_segment_len-len(ids)) 
+                for ids in X_pf]
+            pb_tensor = torch.LongTensor(padded_pb).to(DEVICE)
+            pf_tensor = torch.LongTensor(padded_pf).to(DEVICE)
+            pause_feats = [pb_tensor, pf_tensor]
+        else:
+            pause_feats = None
 
-        pb_tensor = torch.LongTensor(padded_pb).to(DEVICE)
-        pf_tensor = torch.LongTensor(padded_pf).to(DEVICE)
-        pause_feats = [pb_tensor, pf_tensor]
-        scalar_feats = [torch.Tensor(padded_rp).to(DEVICE), 
-                torch.Tensor(padded_wd).to(DEVICE)]
-        frame_feats = padded_frames
+        scalar_feats = [None, None]
+        if "pause_raw" in self.feature_types:
+            padded_rp = [np.hstack([feats, 
+                np.zeros((2, max_segment_len-feats.shape[1]))]) 
+                for feats in X_rp]
+            scalar_feats[0] = torch.Tensor(padded_rp).to(DEVICE)
+
+        if "word_dur" in self.feature_types:
+            padded_wd = [np.hstack([feats, 
+                np.zeros((2, max_segment_len-feats.shape[1]))]) 
+                for feats in X_wd]
+            scalar_feats[1] = torch.Tensor(padded_wd).to(DEVICE)
+
+        if self.frame_features:
+            padded_frames = [feats + 
+                [np.zeros((self.fixed_word_length, self.feat_dim))] * (
+                max_segment_len-len(feats)) for feats in X_frames]
+            frame_feats = padded_frames
+        else:
+            frame_feats = None
+
         Y = [y + [self.pad_label_id]*(max_segment_len-len(y)) for y in Y]
+        Y_B = [y + [self.pad_label_id]*(max_segment_len-len(y)) for y in Y_B]
         X_floor = torch.LongTensor(X_floor).view(batch_size, 
                 self.history_len)
         Y = torch.LongTensor(Y).view(batch_size, -1)
+        Y_B = torch.LongTensor(Y_B).view(batch_size, -1)
 
         X_type_ids = X_type_ids
         X_attn_masks = X_attn_masks
@@ -283,7 +335,8 @@ class SpeechDataSource():
             "X_type_ids": X_type_ids.to(DEVICE),
             "X_attn_masks": X_attn_masks.to(DEVICE),
             "X_speech": [pause_feats, frame_feats, scalar_feats],
-            "Y": Y.to(DEVICE)
+            "Y": Y.to(DEVICE),
+            "Y_B": Y_B.to(DEVICE)
         }
 
         return batch_data_dict
@@ -312,6 +365,7 @@ class TextDataSource():
             for uttr in sess["utterances"]:
                 uttr_tokens = []
                 uttr_labels = []
+                bound_label_ids = []
                 for segment in uttr:
                     text = segment["text"]
                     floor = segment["floor"]
@@ -319,16 +373,19 @@ class TextDataSource():
                     tokens = self.tokenizer.convert_string_to_tokens(text)[:self.max_uttr_len]
                     uttr_tokens += tokens
                     uttr_labels += ["I"] * (len(tokens) - 1) + ["E_"+dialog_act]
+                    bound_label_ids += [0] * (len(tokens) - 1) + [1]
 
                 uttr_tokens = [self.tokenizer.cls_token] + uttr_tokens + [self.tokenizer.sep_token]
                 uttr_token_ids = self.tokenizer.convert_tokens_to_ids(uttr_tokens)
                 uttr_label_ids = [self.bos_label_id] + [self.label_tokenizer.word2id[label] for label in uttr_labels] + [self.eos_label_id]
+                bound_label_ids = [self.bos_label_id] + bound_label_ids + [self.eos_label_id]
                 uttr_floor_id = ["A", "B"].index(floor)
                 
                 sess["processed_utterances"].append({
                     "token_ids": uttr_token_ids,
                     "label_ids": uttr_label_ids,
-                    "floor_id": uttr_floor_id
+                    "floor_id": uttr_floor_id,
+                    "bound_ids": bound_label_ids,
                 })  
 
         # Get segments
@@ -372,7 +429,8 @@ class TextDataSource():
             return None
 
         # Data to fill in
-        X, Y, X_floor = [], [], []
+        X, X_floor = [], []
+        Y, Y_B = [], []
 
         empty_sent = ""
         empty_tokens = self.tokenizer.convert_string_to_tokens(empty_sent)
@@ -381,7 +439,8 @@ class TextDataSource():
             "tokens": empty_tokens,
             "token_ids": empty_ids,
             "floor_id": 0,
-            "label_ids": [self.pad_label_id] * len(empty_ids)
+            "label_ids": [self.pad_label_id] * len(empty_ids),
+            "bound_ids": [self.pad_label_id] * len(empty_ids)
         }
 
         while self.cur_fragment_idx < len(self.fragments):
@@ -400,6 +459,7 @@ class TextDataSource():
             
             segment = segments[-1]
             Y.append(segment["label_ids"])
+            Y_B.append(segment["bound_ids"])
 
             # Then padding segments
             for _ in range(self.history_len-len(segments)):
@@ -417,8 +477,10 @@ class TextDataSource():
         # history_len should not be affected
         batch_size = len(Y)
         Y = [y + [self.pad_label_id]*(max_segment_len-len(y)) for y in Y]
+        Y_B = [y + [self.pad_label_id]*(max_segment_len-len(y)) for y in Y_B]
         X_floor = torch.LongTensor(X_floor).to(DEVICE).view(batch_size, self.history_len)
         Y = torch.LongTensor(Y).to(DEVICE).view(batch_size, -1)
+        Y_B = torch.LongTensor(Y_B).to(DEVICE).view(batch_size, -1)
 
         # NOTE: don't do this reshape here
         #X = X.to(DEVICE).view(batch_size, self.history_len, -1)
@@ -430,7 +492,8 @@ class TextDataSource():
             "X_floor": X_floor,
             "X_type_ids": X_type_ids,
             "X_attn_masks": X_attn_masks,
-            "Y": Y
+            "Y": Y,
+            "Y_B": Y_B
         }
 
         return batch_data_dict

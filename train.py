@@ -158,6 +158,9 @@ def run_train(config):
             if batch_data is None:
                 break
 
+            if config.debug and n_step > 30: 
+                break
+            
             # Forward
             model.train()
             ret_data, ret_stat = model.train_step(batch_data)
@@ -387,6 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=0.0)
 
     # management
+    parser.add_argument("--debug", type=str2bool, default=False)
     parser.add_argument("--model_path", help="path to model")
     parser.add_argument("--corpus", type=str, default="swda", help="[swda]")
     parser.add_argument("--enable_log", type=str2bool, default=True)
