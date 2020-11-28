@@ -142,7 +142,11 @@ def make_feats(args):
                 outfeats = [list(x) for x in outfeats]
                 json.dump(outfeats, f, indent=2)
 
-    sessname = os.path.join(out_dir, split + "_bert_time_data.json")
+    if "asr" in suffix:
+        sessname = os.path.join(out_dir, split + "_asr_time_data.json")
+    else:
+        sessname = os.path.join(out_dir, split + "_bert_time_data.json")
+
     with open(sessname, 'w') as f:
         json.dump(out_sess, f)
     return

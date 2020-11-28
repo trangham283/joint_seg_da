@@ -89,8 +89,12 @@ def get_bert_da_labels(row):
     sent_ids = [row.sent_id]*copy_num
     return labels, sent_ids
 
-def postprocess_turnlevel(data_dir, split):
-    filename = os.path.join(data_dir, split + "_aligned.tsv")
+def postprocess_turnlevel(data_dir, split, data_origin="bert"):
+    if data_origin == "bert":
+        suffix = "_aligned.tsv"
+    else:
+        suffix = "_asr.tsv"
+    filename = os.path.join(data_dir, split + suffix)
     df = pd.read_csv(filename, sep="\t")
     da_lengths = []
     sessions = {}
@@ -120,7 +124,10 @@ def postprocess_turnlevel(data_dir, split):
                 bert_tokens = sent_df.bert_toks.tolist()
                 bert_tokens = [item for x in bert_tokens for item in x]
                 turn_tokens += bert_tokens
-                dialog_act = sent_df.da_label.values[0]
+                if "asr" in suffix:
+                    dialog_act = ["asr_temp"]
+                else:
+                    dialog_act = sent_df.da_label.values[0]
                 joint_labels += ["I"]*(len(bert_tokens) - 1) + ["E_"+dialog_act]
                 sent_ids += [sent_id]*len(bert_tokens)
             # NOTE: needed to convert to int() here bc of JSON
@@ -146,10 +153,12 @@ def main():
     pa = argparse.ArgumentParser(description='combine tokens into turns')
     pa.add_argument('--data_dir', help="data path", default="../../data/joint")
     pa.add_argument('--split', default="dev", help="data split")
+    pa.add_argument('--data_origin', default="bert", help="gold or asr")
 
     args = pa.parse_args()
     data_dir = args.data_dir
     split = args.split
+    data_origin = args.data_origin
 
     #split_df, lengths = postprocess(data_dir, split)
     #outname = os.path.join(data_dir, split + '_aligned_dialogs.tsv')
@@ -161,8 +170,8 @@ def main():
     #outname = os.path.join(data_dir, split + '_aligned_dialogs_wordlevel.tsv')
     #split_df.to_csv(outname, sep="\t", index=False)
     
-    outname = os.path.join(data_dir, split + '_bert_turns.json')
-    sessions = postprocess_turnlevel(data_dir, split)
+    outname = os.path.join(data_dir, split + '_' + data_origin + '_turns.json')
+    sessions = postprocess_turnlevel(data_dir, split, data_origin)
     with open(outname, "w") as f:
         json.dump(sessions, f)
     
