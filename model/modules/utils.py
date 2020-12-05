@@ -130,6 +130,8 @@ def init_module_weights(m, init_w=0.08):
         m.bias.data.fill_(0)
     elif isinstance(m, nn.Embedding):
         m.weight.data.uniform_(-1.0, 1.0)
+    elif isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
     elif isinstance(m, nn.GRU) or isinstance(m, nn.LSTM):
         for name, param in m.named_parameters():
             if "weight" in name:
@@ -147,6 +149,8 @@ def init_module_weights(m, init_w=0.08):
     elif isinstance(m, (nn.Tanh, nn.ReLU, nn.LeakyReLU, nn.Sigmoid, nn.Dropout)):
         pass
     elif isinstance(m, (nn.BatchNorm1d)):
+        pass
+    elif isinstance(m, (nn.MaxPool2d)):
         pass
     elif isinstance(m, (nn.Identity)):
         pass

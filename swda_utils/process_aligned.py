@@ -96,10 +96,19 @@ def postprocess_turnlevel(data_dir, split, data_origin="bert"):
         suffix = "_asr.tsv"
     filename = os.path.join(data_dir, split + suffix)
     df = pd.read_csv(filename, sep="\t")
+
+    # TODO: create a column for grouping: filenum+asrhyp
+    if data_origin == 'asr':
+        df = 
+
     da_lengths = []
     sessions = {}
     # order by dialog
-    for filenum, df_file in df.groupby('filenum'):
+    if data_origin == 'bert':
+        column = 'filenum'
+    else:
+        column = 'filenum_hyp'
+    for filenum, df_file in df.groupby(column):
         list_row = []
         df_sorted_sents = df_file.sort_values('turn_id', kind='mergesort')
         for turn_id, df_turn in df_sorted_sents.groupby('turn_id'):
@@ -124,16 +133,20 @@ def postprocess_turnlevel(data_dir, split, data_origin="bert"):
                 bert_tokens = sent_df.bert_toks.tolist()
                 bert_tokens = [item for x in bert_tokens for item in x]
                 turn_tokens += bert_tokens
-                if "asr" in suffix:
-                    dialog_act = ["asr_temp"]
+                if data_origin == "asr":
+                    dialog_act = "asr"
                 else:
                     dialog_act = sent_df.da_label.values[0]
                 joint_labels += ["I"]*(len(bert_tokens) - 1) + ["E_"+dialog_act]
                 sent_ids += [sent_id]*len(bert_tokens)
             # NOTE: needed to convert to int() here bc of JSON
+            if data_origin == "asr":
+                speaker = df_sorted.speaker.values[0]
+            else:
+                speaker = df_sorted.true_speaker.values[0]
             list_row.append({
                 'filenum': int(filenum),
-                'speaker': df_sorted.true_speaker.values[0],
+                'speaker': speaker,
                 'turn_id': int(df_sorted.turn_id.values[0]),
                 'sent_ids': sent_ids,
                 'joint_labels': joint_labels,

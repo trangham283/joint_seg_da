@@ -11,3 +11,8 @@ Code based on:
 * Run `align_times.py`
 * Run `processed_aligned.py`
 * Run `get_speech_features.py`
+
+## For ASR data:
+* Run `python process_aligned.py --split {dev,test} --data_origin asr`
+* Run `python get_speech_features.py --split {dev,test} --suffix "_asr_turns.json"`
+

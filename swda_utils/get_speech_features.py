@@ -117,6 +117,8 @@ def make_feats(args):
             else:
                 partitionsB += partition
             out_sess[filenum].append(turn_dict)
+
+        # This only needs to be done once:
         for speaker in ['A', 'B']:
             if speaker == 'A':
                 fbank_file = os.path.join(fbank_dir, 'sw' + filenum + '-A.json')
@@ -142,15 +144,49 @@ def make_feats(args):
                 outfeats = [list(x) for x in outfeats]
                 json.dump(outfeats, f, indent=2)
 
-    if "asr" in suffix:
-        sessname = os.path.join(out_dir, split + "_asr_time_data.json")
-    else:
-        sessname = os.path.join(out_dir, split + "_bert_time_data.json")
+    sessname = os.path.join(out_dir, split + "_bert_time_data.json")
 
     with open(sessname, 'w') as f:
         json.dump(out_sess, f)
     return
 
+# TODO/FIXME: split 10 hypotheses into different keys 
+def make_asr_feats(args):
+    data_dir = args.data_dir
+    split = args.split
+    suffix = args.suffix
+    info_file = os.path.join(data_dir, split + suffix)
+    with open(info_file, 'r') as f:
+        sessions = json.load(f)
+
+    out_sess = {}
+    for filenum in sessions.keys():
+        print(filenum)
+        sess = sessions[filenum]
+        out_sess[filenum] = []
+        partitionsA = []
+        partitionsB = []
+        for turn_dict in sess:
+            feats = get_time_features(turn_dict['start_times'], 
+                    turn_dict['end_times'], turn_dict['da_turn'])
+            speaker = turn_dict['speaker']
+            partition = list(feats[0])
+            turn_dict.update({
+                'partition': partition,
+                'pause_before': feats[1], 'pause_after': feats[2],
+                'rp_before': feats[3], 'rp_after': feats[4],
+                'dur_mean': feats[5], 'dur_max': feats[6],
+                'sent_ids': sorted(set(turn_dict['sent_ids']))
+                })
+            # might as well make the summarized version of fbank feats
+            if speaker == 'A':
+                partitionsA += partition
+            else:
+                partitionsB += partition
+            out_sess[filenum].append(turn_dict)
+    sessname = os.path.join(out_dir, split + "_asr_time_data.json")
+    with open(sessname, 'w') as f:
+        json.dump(out_sess, f)
 
 if __name__ == '__main__':
     pa = argparse.ArgumentParser(description = \
@@ -159,9 +195,9 @@ if __name__ == '__main__':
         default="dev", help="split")
     pa.add_argument('--data_dir', 
         default="/homes/ttmt001/transitory/dialog-act-prediction/data/joint")
-    pa.add_argument('--suffix', default="_bert_turns.json")
 
     args = pa.parse_args()
-    make_feats(args) 
+    #make_feats(args) 
+    make_asr_feats(args) 
     exit(0)
  
