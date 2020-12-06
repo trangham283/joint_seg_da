@@ -187,7 +187,8 @@ def run_train(config):
     print("Total params count: ", total_params_count)
 
     warmup_steps = math.ceil(train_data_source.statistics['n_turns'] * config.n_epochs / config.batch_size * 0.1) #10% of train data for warm-up
-    t_total = math.ceil(train_data_source.statistics['n_turns'] * config.n_epochs / config.batch_size)
+    # additional steps because of different loading schemes
+    t_total = math.ceil(1.5 * train_data_source.statistics['n_turns'] * config.n_epochs / config.batch_size)
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in trainable_parameters if not any(nd in n for nd in no_decay)], 'weight_decay': config.lr_decay_rate},
@@ -211,7 +212,7 @@ def run_train(config):
     lr_scheduler = transformers.get_linear_schedule_with_warmup(
             optimizer, 
             num_warmup_steps=warmup_steps, 
-            num_training_steps=t_total)
+            num_training_steps=t_total) 
 
 
     # log hyper parameters
@@ -311,6 +312,7 @@ def run_train(config):
                                 os.makedirs(this_model_path)
 
                             torch.save(model.state_dict(), f"{this_model_path}/{LOG_FILE_NAME}.model.pt")
+                            torch.save(config, f"{this_model_path}/{LOG_FILE_NAME}.config")
                             mlog(f"model saved to {this_model_path}/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
 
                 # Finished a step
@@ -332,6 +334,7 @@ def run_train(config):
             best_loss = split_loss
             if config.save_model:
                 torch.save(model.state_dict(), f"{this_model_path}/{LOG_FILE_NAME}.model.pt")
+                torch.save(config, f"{this_model_path}/{LOG_FILE_NAME}.config")
                 mlog(f"model saved to {this_model_path}/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
         if not config.debug:
             experiment.log_metrics(metrics_results)
@@ -368,9 +371,42 @@ def run_train(config):
 # TODO
 def run_test(config):
     # tokenizers
+    LOG_FILE_NAME = "debug.log"
     tokenizer = ModBertTokenizer('base', cache_dir=config.cache_dir)
+    label_token_dict = {
+            "pad_token": "<pad>",
+            "bos_token": "<t>",
+            "eos_token": "</t>",}
+    label_token_dict.update({
+        f"label_{label_idx}_token": label 
+        for label_idx, label in enumerate(config.joint_da_seg_recog_labels)
+    })
+    label_tokenizer = CustomizedTokenizer(
+        token_dict=label_token_dict
+    )
+
     # metrics calculator
     metrics = DAMetrics()
+    model = SpeechTransformerLabeler(config, tokenizer, 
+            label_tokenizer, freeze=config.freeze)
+    model.load_model(config.model_path)
+    print(f"model path: {config.model_path}")
+    model.eval()
+
+    for set_name in ["dev", "test"]:
+        data_source = SpeechXTSource(
+                split=set_name, config=config,
+                tokenizer=tokenizer, label_tokenizer=label_tokenizer)
+        mlog(str(data_source.statistics), config, LOG_FILE_NAME)
+        current_score, metrics_results, split_loss = eval_split(
+                model, data_source, set_name, 
+                config, label_tokenizer, metrics, 
+                LOG_FILE_NAME, write_pred=True)
+        print("Split loss: ", split_loss)
+        diff = (metrics_results['Macro F1'] - metrics_results['DER']) * 100
+
+        lazy_s = f"DSER, DER, F1, LWER:\n {100*metrics_results['DSER']}\t{100*metrics_results['DER']}\t{100*metrics_results['Macro F1']}\t{diff}\t{100*metrics_results['Macro LWER']}\n"
+        mlog(lazy_s, config, LOG_FILE_NAME)
 
 
 if __name__ == "__main__":
@@ -448,6 +484,7 @@ if __name__ == "__main__":
     # management
     parser.add_argument("--debug", type=str2bool, default=False)
     parser.add_argument("--model_path", help="path to model")
+    parser.add_argument("--config_path", help="path to config")
     parser.add_argument("--enable_log", type=str2bool, default=True)
     parser.add_argument("--save_model", type=str2bool, default=True)
     parser.add_argument("--check_loss_after_n_step", type=int, default=100)
@@ -455,21 +492,15 @@ if __name__ == "__main__":
     parser.add_argument("--filename_note", type=str, 
             help="take a note in saved files' names")
     config = parser.parse_args()
+    
+    from swda_utils.config import SpeechConfig as Config
 
     # load corpus config
-    if config.run_train:
-        from swda_utils.config import SpeechConfig as Config
-    elif config.run_test:
-        from test_configs.config import BertTestConfig as Config
-    else:
-        print("Need to choose run train or run test; Exiting")
-        exit(0)
-
     corpus_config = Config()
+    corpus_config_dict = {}
 
     # merge parse args with corpus config
     # priority: parse args > corpus config
-    corpus_config_dict = {}
     for k, v in corpus_config.__dict__.items():
         if not k.startswith("__") and k not in config.__dict__:
             corpus_config_dict[k] = v

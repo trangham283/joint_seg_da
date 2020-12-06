@@ -642,7 +642,6 @@ class SpeechAttnEDSeqLabeler(nn.Module):
             model_size="bert-base-uncased", 
             cache_dir="/s0/ttmt001", freeze='all'):
         super(SpeechAttnEDSeqLabeler, self).__init__()
-
         # Attributes
         self.feature_types = config.feature_types
         self.feat_sizes = config.feat_sizes

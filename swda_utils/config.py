@@ -1,5 +1,6 @@
 class SpeechConfig(object):
     def __init__(self):
+        self._skip_keys = []
         self.dialog_acts = ['sd', 'b', 'sv', '%', 'aa', 'ba', 'qy', 'ny', 'fc',
                 'qw', 'nn', 'bk', 'fo_o_fw_"_by_bc', 'h', 'qy^d', 'bh', '^q', 
                 'bf', 'na', 'ad', '^2', 'b^m', 'qo', 'qh', '^h', 'ar', 'ng', 
@@ -30,6 +31,14 @@ class SpeechConfig(object):
         self.ms_dir = "/g/ssli/data/treebank/ms_alignment/swb_ms98_transcriptions/"
         #self.out_dir = "/s0/ttmt001/swda_tsv"
         self.out_dir = self.task_data_dir
+
+    def to_dict(self):
+        res = {}
+        for k in dir(self):
+            if k.startswith('_') or k in self._skip_keys:
+                continue
+            res[k] = getattr(self, k)
+        return res
 
 class TrainConfig(object):
     def __init__(self):
