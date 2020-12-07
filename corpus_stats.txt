@@ -1,6 +1,5 @@
 With BERT tokenization:
 
-
 TRAIN:
     # conv: 1,115
     # turns: 107,849
@@ -33,5 +32,26 @@ TEST:
     # median len: 10
     # len([x for x in lenstats if x > 45]) = 147
     # len([x for x in lenstats if x > 100]) = 17
+
+For estimating computational complexity, with batch size 32:
+Statistics on seq_len per batch:
+
+TRAIN: 
+- min: 3
+- max: 456
+- mean: 70.12
+- median: 62
+
+DEV: 
+- min: 4
+- max: 286
+- mean: 80.11
+- median: 75
+
+TEST: 
+- min: 3
+- max: 184
+- mean: 64.57
+- median: 55.5
 
 

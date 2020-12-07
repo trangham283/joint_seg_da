@@ -355,6 +355,216 @@ class AttnEncoder(nn.Module):
         return output.transpose(0, 1)
 
 # TODO
+class SpeechBaselineLabeler(nn.Module):
+    def __init__(self, config, tokenizer, label_tokenizer, 
+            model_size="bert-base-uncased", 
+            cache_dir="/s0/ttmt001", freeze='all'):
+        super(SpeechBaselineLabeler, self).__init__()
+
+        # Speech encoding attributes
+        self.feature_types = config.feature_types
+        self.feat_sizes = config.feat_sizes
+        self.conv_sizes = config.conv_sizes
+        self.num_conv = config.num_conv
+        self.d_pause_embedding = config.d_pause_embedding
+        self.pause_vocab = config.pause_vocab
+        self.d_speech = config.d_speech if config.feature_types else 0
+        self.fixed_word_length = config.fixed_word_length
+
+        # Model attributes
+        self.history_len = config.history_len
+        self.num_labels = len(label_tokenizer)
+        self.encoder_hidden_dim = config.encoder_hidden_dim
+        self.n_encoder_layers = config.n_encoder_layers
+        self.pos_encoder_hidden_dim = config.pos_encoder_hidden_dim
+        self.seq_max_len = config.seq_max_len
+        self.dropout = config.dropout if hasattr(config, "dropout") else 0.0
+
+        # Submodule configs
+        self.pos_mode = config.pos_mode
+        self.pos_comb = config.pos_comb
+        self.pooling_mode_cls_token = config.pooling_mode_cls_token
+        self.pooling_mode_max_tokens = config.pooling_mode_max_tokens
+        self.pooling_mode_mean_tokens = config.pooling_mode_mean_tokens
+        self.attr_embedding_dim = config.attr_embedding_dim
+
+        # Vocabulary attributes
+        self.word2id = tokenizer.word2id
+        self.id2word = tokenizer.id2word
+        self.label2id = label_tokenizer.word2id
+        self.id2label = label_tokenizer.id2word
+        self.vocab_size = len(tokenizer)
+        self.label_vocab_size = len(label_tokenizer)
+        self.pad_token_id = tokenizer.pad_token_id
+        self.pad_label_id = label_tokenizer.pad_token_id
+
+        # Encoding components
+        # Bert specific attributes
+        self.word_embedding = BertEmbedder(model_size, cache_dir=cache_dir, 
+                freeze=freeze)
+        self.word_embedding_dim = self.word_embedding.embedding_size
+
+        # Speech encoder attributes
+        if self.feature_types:
+            self.speech_encoder = SpeechFeatureEncoder(
+                self.feature_types, self.feat_sizes,
+                self.d_speech, 
+                conv_sizes=self.conv_sizes,
+                num_conv=self.num_conv,
+                d_pause_embedding=self.d_pause_embedding,
+                pause_vocab_len=len(self.pause_vocab),
+                fixed_word_length=self.fixed_word_length,
+                speech_dropout=self.dropout)
+        else:
+            self.speech_encoder = None
+
+        #TODO
+        ninp = self.word_embedding_dim  + self.d_speech
+        pos_inp = ninp if self.pos_comb == 'add' else self.pos_encoder_hidden_dim
+        self.pos_encoder = PositionalEncoding(pos_inp, mode=self.pos_mode, 
+                comb=self.pos_comb, dropout=self.dropout, 
+                max_len=self.seq_max_len)
+        dec_inp = ninp if self.pos_comb == 'add' else ninp + self.pos_encoder_hidden_dim 
+        self.dec_inp = dec_inp
+
+        # Decoding components
+        self.decoder = nn.Linear(dec_inp, self.num_labels)
+        init_module_weights(self.decoder)
+
+
+    def _get_attn_mask(self, attn_keys):
+        attn_mask = (attn_keys != self.pad_token_id)
+        return attn_mask
+
+    def _encode(self, data):
+        X_data = data["X"]
+        seq_len = X_data.size(-1)
+        batch_size = X_data.size(0) // self.history_len
+        X = X_data.view(batch_size, self.history_len, -1)
+        X_type_ids = data["X_type_ids"] 
+        X_attn_masks = data["X_attn_masks"]
+        input_floors = data["X_floor"]
+        Xtext = self.word_embedding(X_data, X_type_ids, X_attn_masks)
+        
+        if self.speech_encoder is not None:
+            Xspeech = self.speech_encoder(data["X_speech"])
+            embedded_inputs = torch.cat([Xtext, Xspeech], -1)
+        else:
+            embedded_inputs = Xtext
+
+        encoded = self.pos_encoder(embedded_inputs)
+
+        return encoded, batch_size
+
+    def _decode(self, word_encodings):
+        batch_size = word_encodings.size(0)
+        feats = word_encodings[:, 1:-1, :].contiguous()  # excluding bos, eos
+        outputs = self.decoder(feats)
+        ret_dict = {}
+        ret_dict["logits"] = outputs
+        ret_dict["symbols"] = outputs.topk(1)[1]
+        return ret_dict
+
+    def train_step(self, data):
+        # Forward
+        word_encodings, batch_size = self._encode(data)
+        Y = data["Y"]
+        Y_out = Y[:, 1:-1].contiguous() # don't count eos in loss
+        max_y_len = Y_out.size(1)
+
+        decoder_ret_dict = self._decode(word_encodings)
+
+        # Calculate loss
+        loss = 0
+        logits = decoder_ret_dict["logits"]
+        label_losses = F.cross_entropy(
+            logits.view(-1, self.label_vocab_size),
+            Y_out.view(-1),
+            ignore_index=self.pad_label_id,
+            reduction="none"
+        ).view(batch_size, max_y_len)
+        sent_loss = label_losses.sum(1).mean(0)
+        loss += sent_loss
+        
+        # return dicts
+        ret_data = {
+            "loss": loss,
+            "symbols": decoder_ret_dict["symbols"]
+        }
+        ret_stat = {
+            "loss": loss.item()
+        }
+
+        return ret_data, ret_stat
+
+    def evaluate_step(self, data):
+        with torch.no_grad():
+            # Forward
+            word_encodings, batch_size = self._encode(data)
+            Y = data["Y"]
+            Y_out = Y[:, 1:-1].contiguous()
+            max_y_len = Y_out.size(1)
+            decoder_ret_dict = self._decode(word_encodings)
+
+            # Calculate loss
+            loss = 0
+            logits = decoder_ret_dict["logits"]
+            label_losses = F.cross_entropy(
+                logits.view(-1, self.label_vocab_size),
+                Y_out.view(-1),
+                ignore_index=self.pad_label_id,
+                reduction="none"
+            ).view(batch_size, max_y_len)
+            sent_loss = label_losses.sum(1).mean(0)
+            loss += sent_loss
+        
+        # return dicts
+        ret_data = {"symbols": decoder_ret_dict["symbols"]}
+        ret_stat = {
+            "monitor": loss.item(),
+            "loss": loss.item()
+        }
+
+        return ret_data, ret_stat
+
+    def test_step(self, data):
+        loss = None
+        with torch.no_grad():
+            # Forward
+            word_encodings, batch_size = self._encode(data)
+            decoder_ret_dict = self._decode(word_encodings)
+            if "Y" in data:
+                Y = data["Y"]
+                Y_out = Y[:, 1:-1].contiguous()
+                max_y_len = Y_out.size(1)
+                logits = decoder_ret_dict["logits"]
+                label_losses = F.cross_entropy(
+                    logits.view(-1, self.label_vocab_size),
+                    Y_out.view(-1), ignore_index=self.pad_label_id,
+                    reduction="none"
+                ).view(batch_size, max_y_len)
+                loss = label_losses.sum()
+                loss = loss.item()
+
+        ret_data = {
+            "symbols": decoder_ret_dict["symbols"],
+            "batch_loss": loss
+        }
+        ret_stat = {}
+        return ret_data, ret_stat
+
+    def load_model(self, model_path):
+        """Load pretrained model weights from model_path
+
+        Arguments:
+            model_path {str} -- path to pretrained model weights
+        """
+        pretrained_state_dict = torch.load(
+            model_path,
+            map_location=lambda storage, loc: storage
+        )
+        self.load_state_dict(pretrained_state_dict)
+
 class SpeechTransformerLabeler(nn.Module):
     def __init__(self, config, tokenizer, label_tokenizer, 
             model_size="bert-base-uncased", 

@@ -6,3 +6,4 @@ condor_reference.txt
 debug*
 *_bak.py
 .migrate*
+job*.sh

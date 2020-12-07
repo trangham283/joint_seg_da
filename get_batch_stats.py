@@ -20,7 +20,7 @@ from data_source import SpeechDataSource
 
 from swda_utils.config import SpeechConfig as Config
 config = Config()
-
+config.seed = 42
 
 # set random seeds
 torch.manual_seed(config.seed)
@@ -44,25 +44,67 @@ label_tokenizer = CustomizedTokenizer(
 )
 
 # data loaders & number reporters
-config.downsample = False
-config.feature_types = ['pitch', 'fb3', 'pause', 'pause_raw', 'word_dur']
+#split = 'test'
+
+#config.suffix = "_bert_time_data.json"
+#data_source = SpeechDataSource(split=split, config=config, 
+#        tokenizer=tokenizer, label_tokenizer=label_tokenizer)
+#
+#lenstats = []
+#for dialog, fragments in data_source.fragments.items():
+#    for frag in fragments:
+#        turn = frag[-1]
+#        lentok = len(turn['token_ids'])
+#        lenstats.append(lentok)
+#
+#
+#print(min(lenstats), max(lenstats), np.mean(lenstats), np.median(lenstats))
+#print(len([x for x in lenstats if x > 45]))
+#print(len([x for x in lenstats if x > 100]))
+
+#################################################
 config.suffix = "_bert_time_data.json"
 
-split = 'test'
+split = 'train'
+
+config.feature_types = []
+config.history_len = 1
+config.fixed_word_length = 50
+config.downsample = True
 data_source = SpeechDataSource(split=split, config=config, 
         tokenizer=tokenizer, label_tokenizer=label_tokenizer)
 
-lenstats = []
-for dialog, fragments in data_source.fragments.items():
-    for frag in fragments:
-        turn = frag[-1]
-        lentok = len(turn['token_ids'])
-        lenstats.append(lentok)
+batch_size = 32
+batch_lens = []
+
+dialog_keys = data_source.dialog_keys
+for dialog_idx in dialog_keys:
+    dialog_length = data_source.get_dialog_length(dialog_idx)
+    turn_keys = list(range(dialog_length))
+    dialog_frames = []
+    random.shuffle(turn_keys)
+    for offset in range(0, dialog_length, batch_size):
+        turn_idx = turn_keys[offset:offset+batch_size]
+        batch_data = data_source.get_batch_features(dialog_idx, 
+                dialog_frames, turn_idx)
+        seq_len = batch_data["X"].size(-1)
+        batch_lens.append(seq_len)
+
+print(min(batch_lens), max(batch_lens), np.mean(batch_lens), np.median(batch_lens))
 
 
-print(min(lenstats), max(lenstats), np.mean(lenstats), np.median(lenstats))
-print(len([x for x in lenstats if x > 45]))
-print(len([x for x in lenstats if x > 100]))
 
+#################################################
 
+#split = 'dev'
+#fname = split + "_bert_time_data.json"
+#
+#with open(fname, 'r') as f:
+#    data = json.load(f)
+#
+#turnlens = []
+#for k, dialog in data.items():
+#    for turn in dialog:
+#        turnlens.append(len(turn['da_turn']))
+#
 

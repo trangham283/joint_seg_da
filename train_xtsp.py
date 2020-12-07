@@ -21,6 +21,7 @@ from utils.metrics import JointDAMetrics as DAMetrics
 from tokenization.customized_tokenizer import CustomizedTokenizer
 from tokenization.bert_tokenizer import ModBertTokenizer
 from model.joint_da_seg_recog.ctx_attn_ed import SpeechTransformerLabeler
+from model.joint_da_seg_recog.ctx_attn_ed import SpeechBaselineLabeler
 from data_source import SpeechXTSource
 
 # Create an experiment with your api key:
@@ -167,7 +168,13 @@ def run_train(config):
     
 
     # build model
-    model = SpeechTransformerLabeler(config, tokenizer, label_tokenizer, freeze=config.freeze)
+    if config.model == 'speech_xt':
+        model = SpeechTransformerLabeler(config, tokenizer, label_tokenizer, freeze=config.freeze)
+    elif config.model == 'speech_bl':
+        model = SpeechBaselineLabeler(config, tokenizer, label_tokenizer, freeze=config.freeze)
+    else:
+        print("No model specified, exiting")
+        exit(0)
 
     # model adaption
     if torch.cuda.is_available():
@@ -319,7 +326,6 @@ def run_train(config):
                 n_batch += 1
                 n_step += 1
 
-        # Decay learning rate at end of epoch
         mlog("----- EVALUATING at end of epoch -----", config, LOG_FILE_NAME)
         mlog(f"End of epoch: {epoch}", config, LOG_FILE_NAME)
         current_score, metrics_results, split_loss = eval_split(
@@ -328,6 +334,8 @@ def run_train(config):
                 LOG_FILE_NAME, write_pred=False)
         print("Split loss & best loss ", split_loss, best_loss)
         print("Split score & best score ", current_score, best_score)
+        if not config.debug:
+            experiment.log_metrics(metrics_results)
         if current_score > best_score:
             best_score = current_score
         if split_loss < best_loss:
@@ -336,8 +344,8 @@ def run_train(config):
                 torch.save(model.state_dict(), f"{this_model_path}/{LOG_FILE_NAME}.model.pt")
                 torch.save(config, f"{this_model_path}/{LOG_FILE_NAME}.config")
                 mlog(f"model saved to {this_model_path}/{LOG_FILE_NAME}.model.pt", config, LOG_FILE_NAME)
-        if not config.debug:
-            experiment.log_metrics(metrics_results)
+
+        # Decay learning rate at end of epoch
         #lr_scheduler.step(best_loss)
 
         
