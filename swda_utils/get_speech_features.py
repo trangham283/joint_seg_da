@@ -12,7 +12,6 @@ bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', cache_dir="/
 
 fbank_dir = "/s0/ttmt001/acoustic_features_json/fbank_json"
 fbank3_dir = "/s0/ttmt001/acoustic_features_json/fb3_json"
-out_dir = "/s0/ttmt001/swda"
 dur_file = "/homes/ttmt001/transitory/dialog-act-prediction/data/avg_word_stats.json"
 
 with open(dur_file, 'r') as f:
@@ -86,9 +85,10 @@ def get_time_features(start_times, end_times, sent_toks):
 
 def make_feats(args):
     data_dir = args.data_dir
+    out_dir = args.data_dir
     split = args.split
     suffix = args.suffix
-    info_file = os.path.join(data_dir, split + suffix)
+    info_file = os.path.join(data_dir, split + '_bert' + suffix)
     with open(info_file, 'r') as f:
         sessions = json.load(f)
 
@@ -150,12 +150,14 @@ def make_feats(args):
         json.dump(out_sess, f)
     return
 
-# TODO/FIXME: split 10 hypotheses into different keys 
+# TODO: split 10 hypotheses into different keys
+# FOR NOW: only looking at 1-best
 def make_asr_feats(args):
     data_dir = args.data_dir
+    out_dir = args.data_dir
     split = args.split
     suffix = args.suffix
-    info_file = os.path.join(data_dir, split + suffix)
+    info_file = os.path.join(data_dir, split + '_asr' +  suffix)
     with open(info_file, 'r') as f:
         sessions = json.load(f)
 
@@ -178,11 +180,6 @@ def make_asr_feats(args):
                 'dur_mean': feats[5], 'dur_max': feats[6],
                 'sent_ids': sorted(set(turn_dict['sent_ids']))
                 })
-            # might as well make the summarized version of fbank feats
-            if speaker == 'A':
-                partitionsA += partition
-            else:
-                partitionsB += partition
             out_sess[filenum].append(turn_dict)
     sessname = os.path.join(out_dir, split + "_asr_time_data.json")
     with open(sessname, 'w') as f:
@@ -193,6 +190,8 @@ if __name__ == '__main__':
         "Preprocess segment files to get features")
     pa.add_argument('--split', type=str, \
         default="dev", help="split")
+    pa.add_argument('--suffix', type=str, \
+        default="_turns.json", help="suffix")
     pa.add_argument('--data_dir', 
         default="/homes/ttmt001/transitory/dialog-act-prediction/data/joint")
 

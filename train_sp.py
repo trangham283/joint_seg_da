@@ -361,6 +361,7 @@ if __name__ == "__main__":
 
     # model - architecture
     parser.add_argument("--model", type=str, default="speech_attn_ed")
+    parser.add_argument("--loss_type", type=str, default="cross_entropy")
     parser.add_argument("--rnn_type", type=str, default="gru", 
             help="[gru, lstm]")
     parser.add_argument("--freeze", type=str, default="all", 

@@ -55,8 +55,10 @@ class BertEmbedder(nn.Module):
             cache_dir="/s0/ttmt001",do_lower_case=True, freeze='all'):
         super(BertEmbedder, self).__init__()
 
+        # TODO: FIX THIS
         self.bert = BertModel.from_pretrained(model_size, cache_dir=cache_dir,
                 add_pooling_layer=False)
+        #self.bert = BertModel.from_pretrained(model_size, cache_dir=cache_dir)
         self.tokenizer = BertTokenizer.from_pretrained(model_size, 
                 do_lower_case=do_lower_case, cache_dir=cache_dir)
 
@@ -850,9 +852,11 @@ class SpeechTransformerLabeler(nn.Module):
 class SpeechAttnEDSeqLabeler(nn.Module):
     def __init__(self, config, tokenizer, label_tokenizer, 
             model_size="bert-base-uncased", 
-            cache_dir="/s0/ttmt001", freeze='all'):
+            cache_dir="/s0/ttmt001", freeze='all', 
+            loss_type='cross_entropy'):
         super(SpeechAttnEDSeqLabeler, self).__init__()
         # Attributes
+        self.loss_type = loss_type
         self.feature_types = config.feature_types
         self.feat_sizes = config.feat_sizes
         self.conv_sizes = config.conv_sizes
@@ -899,6 +903,7 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         self.pad_label_id = label_tokenizer.pad_token_id
         self.bos_label_id = label_tokenizer.bos_token_id
         self.eos_label_id = label_tokenizer.eos_token_id
+        self.blank_id = label_tokenizer.word2id['I']
 
         # Encoding components
         if self.feature_types:
@@ -1126,16 +1131,30 @@ class SpeechAttnEDSeqLabeler(nn.Module):
         )
 
         # Calculate loss
-        loss = 0
         logits = decoder_ret_dict["logits"]
-        label_losses = F.cross_entropy(
-            logits.view(-1, self.label_vocab_size),
-            Y_out.view(-1),
-            ignore_index=self.pad_label_id,
-            reduction="none"
-        ).view(batch_size, max_y_len)
-        sent_loss = label_losses.sum(1).mean(0)
-        loss += sent_loss
+        loss = 0
+        if self.loss_type == 'ctc':
+            scores = F.log_softmax(logits, -1).transpose(0, 1)
+            input_lens = (X[:, :, 1:] != self.pad_token_id).sum(-1) # no <bos>
+            targets = [y[y != self.blank_id] for y in list(Y_out)]
+            targets = [y[y != self.pad_label_id] for y in targets]
+            target_lens = torch.LongTensor([len(x) for x in targets])
+            targets = torch.cat(targets)
+            sent_loss = F.ctc_loss(
+                    scores, targets, 
+                    input_lens, 
+                    target_lens, 
+                    blank=self.blank_id)
+            loss += sent_loss        
+        else:
+            label_losses = F.cross_entropy(
+                logits.view(-1, self.label_vocab_size),
+                Y_out.view(-1),
+                ignore_index=self.pad_label_id,
+                reduction="none"
+            ).view(batch_size, max_y_len)
+            sent_loss = label_losses.sum(1).mean(0)
+            loss += sent_loss
         
         # return dicts
         ret_data = {
@@ -1175,14 +1194,28 @@ class SpeechAttnEDSeqLabeler(nn.Module):
             # Calculate loss
             loss = 0
             logits = decoder_ret_dict["logits"]
-            label_losses = F.cross_entropy(
-                logits.view(-1, self.label_vocab_size),
-                Y_out.view(-1),
-                ignore_index=self.pad_label_id,
-                reduction="none"
-            ).view(batch_size, max_y_len)
-            sent_loss = label_losses.sum(1).mean(0)
-            loss += sent_loss
+            if self.loss_type == 'ctc':
+                scores = F.log_softmax(logits, -1).transpose(0, 1)
+                input_lens = (X[:, :, 1:] != self.pad_token_id).sum(-1)
+                targets = [y[y != self.blank_id] for y in list(Y_out)]
+                targets = [y[y != self.pad_label_id] for y in targets]
+                target_lens = torch.LongTensor([len(x) for x in targets])
+                targets = torch.cat(targets)
+                sent_loss = F.ctc_loss(
+                        scores, targets, 
+                        input_lens, 
+                        target_lens, 
+                        blank=self.blank_id)
+                loss += sent_loss        
+            else:
+                label_losses = F.cross_entropy(
+                    logits.view(-1, self.label_vocab_size),
+                    Y_out.view(-1),
+                    ignore_index=self.pad_label_id,
+                    reduction="none"
+                ).view(batch_size, max_y_len)
+                sent_loss = label_losses.sum(1).mean(0)
+                loss += sent_loss
         
         # return dicts
         ret_data = {}

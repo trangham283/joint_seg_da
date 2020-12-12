@@ -1,3 +1,36 @@
+class ASRConfig(object):
+    def __init__(self):
+        self._skip_keys = []
+        self.dialog_acts = ['sd', 'b', 'sv', '%', 'aa', 'ba', 'qy', 'ny', 'fc',
+                'qw', 'nn', 'bk', 'fo_o_fw_"_by_bc', 'h', 'qy^d', 'bh', '^q', 
+                'bf', 'na', 'ad', '^2', 'b^m', 'qo', 'qh', '^h', 'ar', 'ng', 
+                'br', 'no', 'fp', 'qrr', 'arp_nd', 't3', 'oo_co_cc', 't1', 'bd',
+                'aap_am', '^g', 'qw^d', 'fa', 'ft']
+        self.joint_da_seg_recog_labels = ["I"] + ["E_"+da for da in self.dialog_acts]
+        self.n_workers = 1
+        
+        # Management
+        self.task_data_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/joint"
+        self.dataset_path = f"{self.task_data_dir}"
+        self.word_count_path = f"{self.task_data_dir}/word_count.txt"
+        self.feature_dir = "/s0/ttmt001/acoustic_features_json"
+        self.cache_dir = "/s0/ttmt001"
+        self.model_save_path = "/s0/ttmt001/joint_da"
+        self.suffix = "_asr_time_data.json"
+        self.pause_vocab = {"<PAD>": 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 
+                "<START>": 7, "<STOP>": 8}
+        self.feat_sizes = {'pitch': 3, 'fb3': 3, 'mfcc': 13, 'fbank': 41}
+
+        self.out_dir = self.task_data_dir
+
+    def to_dict(self):
+        res = {}
+        for k in dir(self):
+            if k.startswith('_') or k in self._skip_keys:
+                continue
+            res[k] = getattr(self, k)
+        return res
+
 class SpeechConfig(object):
     def __init__(self):
         self._skip_keys = []

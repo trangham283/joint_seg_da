@@ -98,17 +98,18 @@ def postprocess_turnlevel(data_dir, split, data_origin="bert"):
     df = pd.read_csv(filename, sep="\t")
 
     # TODO: create a column for grouping: filenum+asrhyp
+    # just use 1-best hyp for now
     if data_origin == 'asr':
-        df = 
+        df['asr_hyp'] = df.sent_id.apply(lambda x: int(x.split('-')[-1]))
+        dfs = []
+        for orig_id, df_sent in df.groupby('orig_id'):
+            this_df = df_sent[df_sent.asr_hyp == df_sent.asr_hyp.min()]
+            dfs.append(this_df)
+        df = pd.concat(dfs).reset_index()
 
     da_lengths = []
     sessions = {}
-    # order by dialog
-    if data_origin == 'bert':
-        column = 'filenum'
-    else:
-        column = 'filenum_hyp'
-    for filenum, df_file in df.groupby(column):
+    for filenum, df_file in df.groupby('filenum'):
         list_row = []
         df_sorted_sents = df_file.sort_values('turn_id', kind='mergesort')
         for turn_id, df_turn in df_sorted_sents.groupby('turn_id'):

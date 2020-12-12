@@ -172,7 +172,10 @@ class SpeechXTSource():
                 tokens = turn["da_turn"]
                 self.statistics["n_tokens"] += len(tokens)
                 floor = turn["speaker"]
+                sent_ids = turn["sent_ids"]
                 turn_labels = turn["joint_labels"]
+                if "asr" in self.suffix:
+                    turn_labels = [x.replace("_asr", "_sd") for x in turn_labels]
                 bound_labels = []
                 for x in turn_labels:
                     if x == "I":
@@ -224,6 +227,7 @@ class SpeechXTSource():
                     word_durations = []
 
                 processed_sessions[filenumstr].append({
+                    "sent_ids": sent_ids,
                     "token_ids": turn_token_ids,
                     "label_ids": turn_label_ids,
                     "bound_ids": bound_label_ids,
@@ -252,6 +256,7 @@ class SpeechXTSource():
         X, Y, X_floor, Y_B = [], [], [], []
         X_frames, X_pb, X_pf = [], [], []
         X_rp, X_wd = [], []
+        sent_ids = []
 
         for idx in turn_indices:
             segments = self.fragments[dialog_key][idx]
@@ -277,6 +282,7 @@ class SpeechXTSource():
             segment = segments[-1]
             Y.append(segment["label_ids"])
             Y_B.append(segment["bound_ids"])
+            sent_ids.append(segment["sent_ids"])
             # Then padding segments
             for _ in range(self.history_len-len(segments)):
                 this_X.insert(0, self.empty_ids)
@@ -349,7 +355,8 @@ class SpeechXTSource():
             "X_attn_masks": X_attn_masks.to(DEVICE),
             "X_speech": [pause_feats, frame_feats, scalar_feats],
             "Y": Y.to(DEVICE),
-            "Y_B": Y_B.to(DEVICE)
+            "Y_B": Y_B.to(DEVICE),
+            "sent_ids": sent_ids
         }
 
         return batch_data_dict
@@ -496,6 +503,9 @@ class SpeechDataSource():
                 self.statistics["n_tokens"] += len(tokens)
                 floor = turn["speaker"]
                 turn_labels = turn["joint_labels"]
+                sent_ids = turn["sent_ids"]
+                if "asr" in self.suffix:
+                    turn_labels = [x.replace("_asr", "_sd") for x in turn_labels]
                 bound_labels = []
                 for x in turn_labels:
                     if x == "I":
@@ -542,6 +552,7 @@ class SpeechDataSource():
                     word_durations = []
 
                 processed_sessions[filenumstr].append({
+                    "sent_ids": sent_ids,
                     "token_ids": turn_token_ids,
                     "label_ids": turn_label_ids,
                     "bound_ids": bound_label_ids,
@@ -570,6 +581,7 @@ class SpeechDataSource():
         X, Y, X_floor, Y_B = [], [], [], []
         X_frames, X_pb, X_pf = [], [], []
         X_rp, X_wd = [], []
+        sent_ids = []
 
         empty_sent = ""
         empty_tokens = self.tokenizer.convert_string_to_tokens(empty_sent)
@@ -601,6 +613,7 @@ class SpeechDataSource():
             segment = segments[-1]
             Y.append(segment["label_ids"])
             Y_B.append(segment["bound_ids"])
+            sent_ids.append(segment["sent_ids"])
             # Then padding segments
             for _ in range(self.history_len-len(segments)):
                 this_X.insert(0, empty_ids)
@@ -673,7 +686,8 @@ class SpeechDataSource():
             "X_attn_masks": X_attn_masks.to(DEVICE),
             "X_speech": [pause_feats, frame_feats, scalar_feats],
             "Y": Y.to(DEVICE),
-            "Y_B": Y_B.to(DEVICE)
+            "Y_B": Y_B.to(DEVICE),
+            "sent_ids": sent_ids
         }
 
         return batch_data_dict
