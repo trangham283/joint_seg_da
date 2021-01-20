@@ -3,3 +3,55 @@ DEV:  0.20260978277855915
 TEST: 0.2302250370570004
 
 
+DEV set
+batch_metrics(tt1000_df.labels.tolist(), tt1000_df.hyps_trans.tolist())
+{'DSER': 0.09823221825967403,
+ 'strict segmentation error': 0.09068847729502526,
+ 'DER': 0.2873828513700387,
+ 'strict joint error': 0.27953951620043216,
+ 'Macro F1': 0.42853709134282647,
+ 'Micro F1': 0.9575319387898358,
+ 'Macro LWER': 0.27096132800830786,
+ 'Micro LWER': 0.29105839416058393}
+
+batch_metrics(sp10004_df.labels.tolist(), sp10004_df.hyps_trans.tolist())
+{'DSER': 0.09619378655376215,
+ 'strict segmentation error': 0.08684014825474667,
+ 'DER': 0.2746146013839729,
+ 'strict joint error': 0.2638527217940235,
+ 'Macro F1': 0.44831366975399234,
+ 'Micro F1': 0.9594272076372314,
+ 'Macro LWER': 0.26291343223924063,
+ 'Micro LWER': 0.28832116788321166}
+
+
+ASR metrics
+batch_metrics_asr(tt1000_df.labels.tolist(), tt1000_df.hyps_asr.tolist())
+{'Macro LWER': 0.4048026764774782,
+ 'Micro LWER': 0.37195863746958635,
+ 'Macro LER': 0.2512693816481347,
+ 'Micro LER': 0.10866208058402359,
+ 'Macro SER': 1.2789210061174672,
+ 'Micro SER': 10.78132603406326,
+ 'Macro NSER': 0.10952720251072905,
+ 'Micro NSER': 0.10462287104622871,
+ 'Macro DAER': 0.4183378454485582,
+ 'Micro DAER': 0.26881229818896535}
+
+batch_metrics_asr(sp10004_df.labels.tolist(), sp10004_df.hyps_asr.tolist())
+{'Macro LWER': 0.33321915187381934,
+ 'Micro LWER': 0.33728710462287104,
+ 'Macro LER': 0.21200899990605945,
+ 'Micro LER': 0.10420468903551874,
+ 'Macro SER': 1.2919854025711257,
+ 'Micro SER': 10.773874695863746,
+ 'Macro NSER': 0.11498445964583852,
+ 'Micro NSER': 0.11344282238442822,
+ 'Macro DAER': 0.3469696528989709,
+ 'Micro DAER': 0.2585287098132809}
+
+
+
+TEST set:
+
+

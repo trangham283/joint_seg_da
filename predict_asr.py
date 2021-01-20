@@ -27,7 +27,7 @@ def reslog(s, RES_FILE_NAME):
     if not os.path.exists(f"{config.task_data_dir}/asr_out/"):
         os.makedirs(f"{config.task_data_dir}/asr_out/")
 
-    with open(f"{config.task_data_dir}/asr_out/{RES_FILE_NAME}.res", "a+", 
+    with open(f"{config.task_data_dir}/asr_out/debug_{RES_FILE_NAME}.res", "a+", 
             encoding="utf-8") as log_f:
         log_f.write(s+"\n")
 
@@ -47,8 +47,15 @@ def eval_split(model, data_source, set_name, config, tokenizer, label_tokenizer)
         for offset in range(0, dialog_length, config.batch_size):
             turn_idx = turn_keys[offset:offset+config.batch_size]
             batch_data = data_source.get_batch_features(dialog_idx, dialog_frames, turn_idx)
-            lens = (batch_data["X"][:, 1:] != tokenizer.pad_token_id).sum(-1).tolist()
+            batch_size = batch_data['X'].size(0) // config.history_len
+            X_data = batch_data['X'].view(batch_size, config.history_len, -1)
+            #print(X_data.shape)
+            lens = []
+            for bidx in range(batch_size):
+                l = (X_data[bidx, config.history_len-1, 1:] != tokenizer.pad_token_id).sum(-1)
+                lens.append(l.item())
             sent_ids = batch_data["sent_ids"]
+            #print(lens)
             
             # Forward
             ret_data, ret_stat = model.test_step(batch_data)
@@ -62,11 +69,44 @@ def eval_split(model, data_source, set_name, config, tokenizer, label_tokenizer)
                 sent_id = sent_ids[i]
                 assert len(sent_id) == 1
                 turn_id = sent_id[0][:-2]
+                #print(i, pred_syms)
                 s = turn_id + "\t" + " ".join(pred_syms) 
                 reslog(s, RES_FILE_NAME)
                 pred_labels.append(pred_syms)
     outname = f"{config.task_data_dir}/asr_out/{RES_FILE_NAME}.res" 
     return outname
+
+# TODO? Need to change tokenization of ASR data if so
+def run_pred_csl(config):
+    special_token_dict = {
+        "speaker1_token": "<speaker1>",
+        "speaker2_token": "<speaker2>"
+    }
+    tokenizer = WhiteSpaceTokenizer(
+        word_count_path=config.word_count_path,
+        vocab_size=config.vocab_size,
+        special_token_dict=special_token_dict
+    )
+    label_token_dict = {
+        f"label_{label_idx}_token": label 
+        for label_idx, label in enumerate(config.joint_da_seg_recog_labels)
+    }
+    label_token_dict.update({
+        "pad_token": "<pad>",
+        "bos_token": "<t>",
+        "eos_token": "</t>"
+    })
+    label_tokenizer = CustomizedTokenizer(
+        token_dict=label_token_dict
+    )
+
+    dev_data_source = DataSource(
+        data=dataset["dev"],
+        config=config,
+        tokenizer=tokenizer,
+        label_tokenizer=label_tokenizer
+    )
+
 
 
 def run_pred(config):

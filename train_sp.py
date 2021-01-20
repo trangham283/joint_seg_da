@@ -23,8 +23,9 @@ from model.joint_da_seg_recog.ctx_attn_ed import SpeechAttnEDSeqLabeler
 from data_source import SpeechDataSource
 
 # Create an experiment with your api key:
+API = os.getenv('COMET_API')
 experiment = Experiment(
-        api_key="YJEjlcG6ebIbBoOJ3sJizohqf",
+        api_key=API,
         project_name="joint-seg-da",
         workspace="trangham283",
         )

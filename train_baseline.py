@@ -24,8 +24,9 @@ from tokenization.customized_tokenizer import CustomizedTokenizer
 from data_source import DataSource
 
 # Create an experiment with your api key:
+API = os.getenv('COMET_API')
 experiment = Experiment(
-        api_key="YJEjlcG6ebIbBoOJ3sJizohqf",
+        api_key=API,
         project_name="joint-seg-da",
         workspace="trangham283",
         )

@@ -17,8 +17,6 @@ from metric_helpers import *
 ref_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/joint/ref_out"
 asr_dir = "/homes/ttmt001/transitory/dialog-act-prediction/data/joint/asr_out"
 
-
-
 def convert_to_list(this_str, turn_float=False):
     this_str = this_str.replace('[', '').replace(']','')
     this_str = this_str.replace("'", "").replace(",","").split()
@@ -68,12 +66,13 @@ def main():
     """main function"""
     pa = argparse.ArgumentParser(description='combine tokens into turns')
     pa.add_argument('--split', default="dev", help="data split")
-    pa.add_argument('--model_name', default="sp10004", help="data split")
+    pa.add_argument('--sp_model', default="sp10004", help="speech model")
+    pa.add_argument('--tt_model', default="tt1000", help="text model")
 
     args = pa.parse_args()
-    data_dir = args.data_dir
     split = args.split
-    model_name = args.model_name
+    sp_model = args.sp_model
+    tt_model = args.tt_model
 
     filename = split + "_merged.tsv"
     merged_df = pd.read_csv(filename, sep="\t")
@@ -82,16 +81,39 @@ def main():
 
     for column in ['start_times_orig', 'end_times_orig', 'start_times_asr', 'end_times_asr']:
         merged_df[column] = merged_df[column].apply(convert_to_list, turn_float=True)
-    sp10004_df = get_results_df("sp10004", split, merged_df)
-    tt1000_df = get_results_df("tt1000", split, merged_df)
+    sp10004_df = get_results_df(sp_model, split, merged_df)
+    print(sp10004_df.head(3))
+    tt1000_df = get_results_df(tt_model, split, merged_df)
+    print(tt1000_df.head(3))
 
+    m1sp = batch_metrics(sp10004_df.labels.tolist(), sp10004_df.hyps_trans.tolist())
+    m1tt = batch_metrics(tt1000_df.labels.tolist(), tt1000_df.hyps_trans.tolist())
+    m2sp = batch_metrics_asr(sp10004_df.labels.tolist(), sp10004_df.hyps_trans.tolist())
+    m2tt =  batch_metrics_asr(tt1000_df.labels.tolist(), tt1000_df.hyps_trans.tolist())
+    m3sp = batch_metrics_asr(sp10004_df.labels.tolist(), sp10004_df.hyps_asr.tolist())
+    m3tt = batch_metrics_asr(tt1000_df.labels.tolist(), tt1000_df.hyps_asr.tolist())
+    columns1 = ["DSER", "DER", "Macro LWER", "Micro LWER"]
+    columns2 = ["Macro SER", "Micro SER", "Macro NSER", "Micro NSER"]
+    columns3 = ["Macro LER", "Micro LER", "Macro LWER", "Micro LWER"]
+    columns4 = ["Macro DAER", "Micro DAER"]
+    columns5 = ["SegWER", "JointWER", "Macro F1", "Micro F1"]
 
-    batch_metrics(sp10004_df.labels.tolist(), sp10004_df.hyps_trans.tolist())
-    batch_metrics(tt1000_df.labels.tolist(), tt1000_df.hyps_trans.tolist())
-    batch_metrics_asr(sp10004_df.labels.tolist(), sp10004_df.hyps_asr.tolist())
-    batch_metrics_asr(tt1000_df.labels.tolist(), tt1000_df.hyps_asr.tolist())
-
-    
+    print("Models:", tt_model, sp_model)
+    print("\t".join(columns1))
+    for result in [m1tt, m1sp]:
+        print(f"{result['DSER']}\t{result['DER']}\t{result['Macro LWER']}\t{result['Micro LWER']}")
+    print()            
+    print("\t".join(columns5))
+    for result in [m1tt, m1sp]:
+        print(f"{result['strict segmentation error']}\t{result['strict joint error']}\t{result['Macro F1']}\t{result['Micro F1']}\t")
+    print()            
+    print("\t".join(columns4+columns3))
+    for result in [m2tt, m2sp, m3tt, m3sp]:
+        print(f"{result['Macro DAER']}\t{result['Micro DAER']}\t{result['Macro LER']}\t{result['Micro LER']}\t{result['Macro LWER']}\t{result['Micro LWER']}")
+    print()
+    print("\t".join(columns2))
+    for result in [m2tt, m2sp, m3tt, m3sp]:
+        print(f"{result['Macro SER']}\t{result['Micro SER']}\t{result['Macro NSER']}\t{result['Micro NSER']}")
     exit(0)
 
 if __name__ == '__main__':

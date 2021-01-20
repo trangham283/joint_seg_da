@@ -100,7 +100,7 @@ def batch_metrics(refs, hyps):
         "Micro LWER": lwer,
     }
 
-def instance_metrics_asr(ref_labels, hyp_labels, dist_fn=levenshtein):
+def instance_metrics_asr(ref_labels, hyp_labels):
     ref_short = [x for x in ref_labels if x != "I"]
     hyp_short = [x for x in hyp_labels if x != "I"]
     lwer = jiwer.wer(ref_short, hyp_short)
@@ -110,10 +110,20 @@ def instance_metrics_asr(ref_labels, hyp_labels, dist_fn=levenshtein):
     t_ids = [i for i, t in enumerate(ref_labels) if "E" in t]
     r_ids = [i for i, r in enumerate(hyp_labels) if "E" in r]
     s = 0
-    for t in t_ids: s += min([abs(r - t) for r in r_ids])
-    for r in r_ids: s += min([abs(r - t) for t in t_ids])
+    for t in t_ids: 
+        if r_ids:
+            dist_t = min([abs(r - t) for r in r_ids])
+        else:
+            dist_t = len(t_ids)
+        s += dist_t
+
+    if r_ids:
+        for r in r_ids: 
+            s += min([abs(r - t) for t in t_ids])
+    else:
+        s += len(t_ids)
         
-    ser = s / 2 / len(ref_short)
+    ser = s / 2 / len(ref_labels)
     nser = abs(len(ref_short) - len(hyp_short)) / len(ref_short)
     
     new_ref = []
@@ -133,7 +143,7 @@ def instance_metrics_asr(ref_labels, hyp_labels, dist_fn=levenshtein):
             "NSER": nser,
             "DAER": daer}
 
-def batch_metrics_asr(refs, hyps, dist_fn=levenshtein):
+def batch_metrics_asr(refs, hyps):
     score_lists = {
         "LWER": [],
         "LER": [],
@@ -158,7 +168,7 @@ def batch_metrics_asr(refs, hyps, dist_fn=levenshtein):
     s = 0
     for t in t_ids: s += min([abs(r - t) for r in r_ids])
     for r in r_ids: s += min([abs(r - t) for t in t_ids])
-    ser = s / 2 / len(t_ids)
+    ser = s / 2 / len(flattened_refs)
     
     nser = abs(len(t_ids) - len(r_ids)) / len(t_ids)
     
