@@ -6,6 +6,9 @@
 * Learning/optimizer common values, general tips, and good coding practices (though can't say I've successfully adopted them all) are based on Nikita Kitaev's [self-attentive parser repo](https://github.com/nikitakit/self-attentive-parser), as well as Nils Reimers' [sentence transformers repo](https://github.com/UKPLab/sentence-transformers). These are beautiful codebases and I learned so much from just studying the code.
 
 ## Steps
+* Preprocessing scripts ...
+* RNN models
+* Transformer models
 
 
 ## TODO items/issues
